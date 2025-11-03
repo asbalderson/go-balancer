@@ -1,0 +1,89 @@
+# Binaries for programs and plugins
+*.so
+*.dylib
+
+# Go build output
+backend/backend
+loadbalancer/loadbalancer
+*.test
+*.out
+
+# Go test binary, built with `go test -c`
+*.test
+
+# Go coverage files
+*.coverprofile
+coverage.txt
+coverage.html
+c.out
+
+# Go dependency directories
+vendor/
+go.work
+go.work.sum
+
+# Go module cache (usually global, but just in case)
+go.sum.backup
+
+# Delve debugger
+__debug_bin
+
+# GoLand / IntelliJ
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Neovim / Vim
+*.swp
+*.swo
+*.swn
+*~
+.*.sw?
+Session.vim
+.netrwhist
+tags
+.vim/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.directory
+
+# Docker
+*.log
+docker-compose.override.yml
+
+# Kubernetes
+*.kubeconfig
+kubeconfig
+.kube/
+
+# Local testing files
+tmp/
+temp/
+*.tmp
+
+# Environment files (may contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Kind cluster configs (if you generate them)
+kind-config.yaml
+
+# Build artifacts
+dist/
+build/
+bin/
+
+# Temporary config files for local testing
+*local.json
+*local.yaml
