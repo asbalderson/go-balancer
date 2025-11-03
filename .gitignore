@@ -41,6 +41,10 @@ __debug_bin
 *.swo
 *.swn
 *~
+*.un~
+**/*.un~
+.*.un~
+**/.*.un~
 .*.sw?
 Session.vim
 .netrwhist
@@ -53,8 +57,6 @@ tags
 ._*
 .Spotlight-V100
 .Trashes
-ehthumbs.db
-Thumbs.db
 .directory
 
 # Docker
