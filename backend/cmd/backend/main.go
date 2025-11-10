@@ -12,5 +12,5 @@ func main() {
 		fmt.Printf("its broked, %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("We loaded the config from main: %+v\n", cfg)
+	fmt.Printf("We loaded the config from main: %v\n", cfg)
 }
