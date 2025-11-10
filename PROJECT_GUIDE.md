@@ -600,19 +600,46 @@ kubectl logs <pod-name> --previous  # Previous crash
 
 ### Phase 1: Backend Service
 
-**Steps:**
-1. Initialize Go module: `go mod init backend`
-2. Create directory structure (cmd/, internal/)
-3. Implement config package (load JSON from file)
-4. Implement handlers package (HTTP response with pod info)
-5. Write main.go to wire everything together
-6. Test locally: `go run cmd/backend/main.go`
-7. Write unit tests: `go test ./...`
-8. Create Dockerfile (multi-stage build)
-9. Build image and load to kind
-10. Create Kubernetes manifests (ConfigMap, Deployment, Service)
-11. Deploy: `kubectl apply -f k8s/backend-*.yaml`
-12. Test: `kubectl port-forward svc/backend-service 8080:8080`
+#### Phase 1a: Get It Working
+**Focus: Build working backend service**
+
+1. ✅ Initialize Go module: `go mod init backend`
+2. ✅ Create directory structure (cmd/, internal/)
+3. ✅ Implement config package (load JSON from file)
+4. ✅ Write basic unit tests for config
+5. Implement handlers package (HTTP response with pod info)
+6. Write main.go to wire everything together
+7. Test locally: `go run cmd/backend/main.go`
+8. Verify handlers work with curl/browser
+
+#### Phase 1b: Polish Backend
+**Focus: Clean up and refactor before Kubernetes**
+
+1. Refactor tests to use `testdata/` directory
+2. Add testify for cleaner assertions
+   - Use `assert.Equal`, `assert.NoError`, etc. for readability
+   - Use `require` for setup that must succeed
+3. Add specific error case testing
+   - Use `assert.ErrorIs` to check for specific errors (e.g., `os.ErrNotExist`)
+   - Use `assert.ErrorAs` to check error types (e.g., `*json.UnmarshalTypeError`)
+   - Use `assert.ErrorContains` to verify error messages
+   - Test different failure modes (missing file, bad JSON, wrong types)
+4. Refactor to table-driven tests
+5. Improve error messages and logging
+6. Run full test suite and ensure 100% pass
+7. Run linter and fix all issues
+8. Code review and cleanup
+
+#### Phase 1c: Deploy to Kubernetes
+**Focus: Containerize and deploy**
+
+1. Create Dockerfile (multi-stage build)
+2. Build image and load to kind
+3. Create Kubernetes manifests (ConfigMap, Deployment, Service)
+4. Deploy: `kubectl apply -f k8s/backend-*.yaml`
+5. Test: `kubectl port-forward svc/backend-service 8080:8080`
+6. Verify pod metadata (POD_NAME, POD_IP) works correctly
+7. Scale and test multiple replicas
 
 ### Phase 2: Load Balancer
 
@@ -633,23 +660,42 @@ kubectl logs <pod-name> --previous  # Previous crash
 14. Deploy: `kubectl apply -f k8s/loadbalancer-*.yaml`
 15. Expose with NodePort and test
 
-### Phase 3: Future Enhancements
+### Phase 3: Advanced Features & Enhancements
 
 **Ideas:**
 - Health checking backends
+  - Active health checks from load balancer
+  - Remove unhealthy backends from rotation
+  - Configurable health check intervals
 - Multiple load balancer replicas
+  - Handle multiple LB instances
+  - Consider shared state or accept independent round-robin counters
 - Weighted round-robin based on load
-- Backend endpoint for artificial load generation
-- Persistent round-robin counter (database or Redis)
-- Metrics and observability (Prometheus)
-- Graceful shutdown handling
-- Request retry logic
-- Circuit breaker pattern
+  - Track backend response times or active connections
+  - Send more traffic to less-loaded backends
+  - Add `/load` endpoint to artificially increase backend load for testing
+- Persistent round-robin counter
+  - Use Redis or database to track state
+  - Survive load balancer restarts
+  - Coordinate across multiple LB replicas
 - Logging package/wrapper for consistent logging
   - Control log levels via config (DEBUG, INFO, WARN, ERROR)
   - Structured logging with `slog` (stdlib since Go 1.21)
   - Optional JSON output for log aggregators
   - Good learning experience for package design patterns
+- Metrics and observability (Prometheus)
+  - Request counts, latency histograms
+  - Backend health status
+  - Expose `/metrics` endpoint
+- Graceful shutdown handling
+  - Drain in-flight requests before shutdown
+  - Handle SIGTERM properly
+- Request retry logic
+  - Retry failed requests to different backend
+  - Configurable retry attempts and backoff
+- Circuit breaker pattern
+  - Temporarily stop sending to failing backends
+  - Auto-recover when backend is healthy
 
 ## Testing Your Load Balancer
 

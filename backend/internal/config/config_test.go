@@ -1,22 +1,11 @@
 package config
 
 import (
-	"os"
 	"testing"
 )
 
 func TestLoadConfig_Success(T *testing.T) {
-	content := `{"port": 8080, "name": "test"}`
-	tmpfile, err := os.CreateTemp("", "config*.json")
-	if err != nil {
-		T.Fatal(err)
-	}
-	defer os.Remove(tmpfile.Name())
-
-	tmpfile.Write([]byte(content))
-	tmpfile.Close()
-
-	cfg, err := LoadConfig(tmpfile.Name())
+	cfg, err := Load("testdata/valid_config.json")
 	if err != nil {
 		T.Fatalf("Expected no error, got: %v", err)
 	}
@@ -25,31 +14,21 @@ func TestLoadConfig_Success(T *testing.T) {
 		T.Errorf("Expected port 8080, got: %d", cfg.Port)
 	}
 
-	if cfg.Name != "test" {
-		T.Errorf("Expected name 'test', got '%s'", cfg.Name)
+	if cfg.ServiceName != "test" {
+		T.Errorf("Expected service name 'test', got '%s'", cfg.ServiceName)
 	}
 
 }
 
 func TestLoadConfig_FileNotFound(T *testing.T) {
-	_, err := LoadConfig("/no/file.json")
+	_, err := Load("/no/file.json")
 	if err == nil {
 		T.Error("Exepected error for missing file, but we found the file?")
 	}
 }
 
 func TestLoadConfig_InvalidJson(T *testing.T) {
-	content := `{"port": "8080", "name": "test"}`
-	tmpfile, err := os.CreateTemp("", "config*.json")
-	if err != nil {
-		T.Fatal(err)
-	}
-	defer os.Remove(tmpfile.Name())
-
-	tmpfile.Write([]byte(content))
-	tmpfile.Close()
-
-	_, err = LoadConfig(tmpfile.Name())
+	_, err := Load("testdata/invalid_config_port_string.json")
 	if err == nil {
 		T.Error("Epected JSON type error, but we loaded anyway?")
 	}

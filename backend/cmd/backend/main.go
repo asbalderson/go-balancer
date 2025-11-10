@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.LoadConfig("/home/alexb/projects/go-balancer/backend/config.json")
+	cfg, err := config.Load("config.json")
 	if err != nil {
 		fmt.Printf("its broked, %v\n", err)
 		os.Exit(1)

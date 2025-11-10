@@ -8,14 +8,14 @@ import (
 )
 
 type Config struct {
-	Port int
-	Name string
+	Port        int    `json:"port"`
+	ServiceName string `json:"name"`
 }
 
-func LoadConfig(path string) (*Config, error) {
+func Load(path string) (*Config, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to load the config file at: %v. %v", path, err)
+		return nil, fmt.Errorf("Failed to open the config file: %s. %w", path, err)
 	}
 	defer file.Close()
 
@@ -25,8 +25,8 @@ func LoadConfig(path string) (*Config, error) {
 
 	err = decoder.Decode(&config)
 	if err != nil {
-		return nil, fmt.Errorf("Error parsing JSON: %v", err)
+		return nil, fmt.Errorf("Error parsing JSON: %w", err)
 	}
-	log.Printf("Loaded the json: $%+v", config)
+	log.Printf("Loaded the json: %+v", config)
 	return config, nil
 }
