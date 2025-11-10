@@ -59,7 +59,7 @@ fmt:
 # Fix imports (order and format)
 imports:
 	@echo "Fixing imports..."
-	cd backend && goimports -w .
+	cd backend && gci write -s standard -s default -s localmodule .
 
 # Run go mod tidy
 tidy:

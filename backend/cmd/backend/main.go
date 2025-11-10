@@ -1,9 +1,10 @@
 package main
 
 import (
-	"backend/internal/config"
 	"fmt"
 	"os"
+
+	"backend/internal/config"
 )
 
 func main() {

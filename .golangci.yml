@@ -42,10 +42,9 @@ linters:
 linters-settings:
   gci:
     sections:
-      - standard  # Standard library packages
-      - default   # Third-party/remote packages
-      - prefix(backend)  # Local backend packages
-      - prefix(loadbalancer)  # Local loadbalancer packages
+      - standard     # Standard library packages
+      - default      # Third-party/remote packages
+      - localmodule  # Auto-detect local packages from go.mod
     skip-generated: true
 
   gocyclo:
