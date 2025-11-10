@@ -18,6 +18,7 @@ linters:
     # Additional useful linters for learning
     - gofmt         # Check formatting
     - goimports     # Check imports are formatted
+    - gci           # Control import order
     - misspell      # Fix spelling mistakes
     - unconvert     # Remove unnecessary conversions
     - goconst       # Find repeated strings that could be constants
@@ -39,6 +40,14 @@ linters:
     - gocognit      # Cognitive complexity
 
 linters-settings:
+  gci:
+    sections:
+      - standard  # Standard library packages
+      - default   # Third-party/remote packages
+      - prefix(backend)  # Local backend packages
+      - prefix(loadbalancer)  # Local loadbalancer packages
+    skip-generated: true
+
   gocyclo:
     min-complexity: 15  # Reasonable for learning
 

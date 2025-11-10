@@ -1,4 +1,4 @@
-.PHONY: help run test lint lint-fix build clean
+.PHONY: help run test lint lint-fix imports build clean
 
 # Set PATH to include Go binaries
 export PATH := $(HOME)/go/bin:$(PATH)
@@ -10,6 +10,7 @@ help:
 	@echo "  make test       - Run all tests"
 	@echo "  make lint       - Run golangci-lint checks"
 	@echo "  make lint-fix   - Run golangci-lint and auto-fix issues"
+	@echo "  make imports    - Fix import order and formatting"
 	@echo "  make build      - Build backend binary"
 	@echo "  make clean      - Clean build artifacts"
 
@@ -54,6 +55,11 @@ clean:
 fmt:
 	@echo "Formatting Go code..."
 	cd backend && go fmt ./...
+
+# Fix imports (order and format)
+imports:
+	@echo "Fixing imports..."
+	cd backend && goimports -w .
 
 # Run go mod tidy
 tidy:
