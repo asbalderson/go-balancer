@@ -1,0 +1,86 @@
+# golangci-lint configuration for go-balancer project
+# Balanced for learning - helpful but not overwhelming
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    # Enabled by default
+    - errcheck      # Checks for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Go vet
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Static analysis
+    - unused        # Detect unused code
+
+    # Additional useful linters for learning
+    - gofmt         # Check formatting
+    - goimports     # Check imports are formatted
+    - gci           # Control import order
+    - misspell      # Fix spelling mistakes
+    - unconvert     # Remove unnecessary conversions
+    - goconst       # Find repeated strings that could be constants
+    - gocyclo       # Cyclomatic complexity
+    - bodyclose     # Check HTTP response bodies are closed
+    - errorlint     # Find misuses of error wrapping
+    - gosec         # Security issues (not too strict for learning)
+
+  disable:
+    # Too strict for learning project
+    - varnamelen    # Variable name length
+    - exhaustruct   # Requires all struct fields
+    - gochecknoglobals
+    - wrapcheck     # Too strict about error wrapping
+    - lll           # Line length - let's not worry about this yet
+    - funlen        # Function length - let's not worry about this yet
+    - cyclop        # Package complexity
+    - nestif        # Deep nesting
+    - gocognit      # Cognitive complexity
+
+linters-settings:
+  gci:
+    sections:
+      - standard     # Standard library packages
+      - default      # Third-party/remote packages
+      - localmodule  # Auto-detect local packages from go.mod
+    skip-generated: true
+
+  gocyclo:
+    min-complexity: 15  # Reasonable for learning
+
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment  # Micro-optimization, not useful for learning
+
+  errcheck:
+    check-blank: false  # Allow _ = err for now
+    check-type-assertions: false
+
+  gosec:
+    excludes:
+      - G104  # Don't error on unhandled errors (errcheck handles this)
+
+  misspell:
+    locale: US
+
+issues:
+  # Don't hide multiple issues on same line
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  # Exclude some issues that are too pedantic for learning
+  exclude-rules:
+    # Exclude for test files
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - goconst
+
+    # Allow fmt.Printf in main for now (you're learning)
+    - path: cmd/.*/main\.go
+      linters:
+        - forbidigo
