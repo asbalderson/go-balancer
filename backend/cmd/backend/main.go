@@ -19,7 +19,7 @@ func main() {
 	}
 	fmt.Printf("We loaded the config from main: %v\n", cfg)
 
-	handler := handlers.NewServiceHandler(cfg.ServiceName, time.Now().Format(time.RFC3339))
+	handler := handlers.NewServiceHandler(cfg.ServiceName)
 
 	mux := http.NewServeMux()
 	handler.Register(mux)

@@ -11,7 +11,7 @@ import (
 )
 
 func TestStatus_NoEnv(t *testing.T) {
-	handler := NewServiceHandler("test", "now")
+	handler := NewServiceHandler("test")
 
 	req := httptest.NewRequest("GET", "/status", nil)
 	rr := httptest.NewRecorder()
@@ -41,7 +41,7 @@ func TestStatus_Env(t *testing.T) {
 		os.Unsetenv("POD_NAME")
 		os.Unsetenv("POD_IP")
 	})
-	handler := NewServiceHandler("test", "now")
+	handler := NewServiceHandler("test")
 
 	req := httptest.NewRequest("GET", "/status", nil)
 	rr := httptest.NewRecorder()
@@ -62,7 +62,7 @@ func TestStatus_Env(t *testing.T) {
 }
 
 func TestStatus_counter(t *testing.T) {
-	handler := NewServiceHandler("test", "now")
+	handler := NewServiceHandler("test")
 
 	req := httptest.NewRequest("GET", "/status", nil)
 	rr := httptest.NewRecorder()
@@ -73,7 +73,7 @@ func TestStatus_counter(t *testing.T) {
 }
 
 func TestPing(t *testing.T) {
-	handler := NewServiceHandler("test", "now")
+	handler := NewServiceHandler("test")
 
 	req := httptest.NewRequest("GET", "/ping", nil)
 	rr := httptest.NewRecorder()

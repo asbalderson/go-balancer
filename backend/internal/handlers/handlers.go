@@ -28,10 +28,10 @@ type ServiceHandler struct {
 	Count       int64
 }
 
-func NewServiceHandler(serviceName string, startTime string) *ServiceHandler {
+func NewServiceHandler(serviceName string) *ServiceHandler {
 	return &ServiceHandler{
 		ServiceName: serviceName,
-		StartTime:   startTime,
+		StartTime:   time.Now().Format(time.RFC3339),
 	}
 }
 
