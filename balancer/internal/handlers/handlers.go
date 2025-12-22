@@ -15,6 +15,7 @@ type StatusResponse struct {
 	BackendPort        int    `json:"backendport"`
 	LoadbalancerPort   int    `json:"loadbalancerport"`
 	LoadbalancerMethod string `json:"loadbalancermethod"`
+	ConnectedHosts     int    `json:"connectedhosts"`
 	StartTime          string `json:"starttime"`
 }
 
@@ -68,6 +69,7 @@ func (s *BalanceHandler) status(w http.ResponseWriter, r *http.Request) {
 		LoadbalancerPort:   s.LoadbalancerPort,
 		LoadbalancerMethod: s.LoadbalancerMethod,
 		StartTime:          s.StartTime,
+		ConnectedHosts:     0,
 	}
 	writeJSON(w, http.StatusOK, response)
 }
