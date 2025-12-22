@@ -7,16 +7,35 @@ Build a working load balancer in Go deployed to Kubernetes (kind) to learn:
 - Kubernetes service discovery and networking
 - Container orchestration
 
+## Project Status
+
+### ✅ Phase 1: Backend Service - COMPLETE
+- Backend HTTP service built and tested
+- Configuration loaded from ConfigMap
+- Pod metadata exposed via Downward API
+- Deployed to Kubernetes with 3 replicas
+- NodePort service on port 30080
+- Responds to `/status` and `/ping` endpoints
+
+**Tech used:**
+- Go standard library (`net/http`, `encoding/json`, `os`, `log`)
+- ConfigMaps for configuration
+- Downward API for pod metadata (POD_NAME, POD_IP)
+- Docker multi-stage builds
+- Kubernetes Deployment, Service, ConfigMap
+
+### 🚧 Phase 2: Load Balancer - IN PROGRESS
+Next up: Build the load balancer component
+
+### 📋 Phase 3: Enhancements - PLANNED
+Future improvements and shared libraries
+
+---
+
 ## What You're Building
 
-### Component 1: Backend Service
+### Component 1: Backend Service ✅
 A simple HTTP API that responds with identifying information about itself.
-
-**Responsibilities:**
-- Start HTTP server on port 8080
-- Respond to requests with JSON containing pod name and IP address
-- Load configuration from `/etc/config/config.json` (mounted ConfigMap)
-- Log requests to stdout
 
 **Configuration (JSON):**
 ```json
@@ -26,24 +45,12 @@ A simple HTTP API that responds with identifying information about itself.
 }
 ```
 
-**Should learn:**
-- HTTP server basics in Go
-- JSON parsing and encoding
-- File I/O
-- Environment variables (for Downward API)
-- Logging to stdout
+**Endpoints:**
+- `GET /status` - Returns pod metadata and config
+- `GET /ping` - Returns pod name and request count
 
-### Component 2: Load Balancer
+### Component 2: Load Balancer 🚧
 Discovers backend pods via Kubernetes API and distributes requests using round-robin.
-
-**Responsibilities:**
-- Load configuration from `/etc/config/config.json`
-- Connect to Kubernetes API (both in-cluster and local kubeconfig)
-- Watch Endpoints for the backend service
-- Maintain list of healthy backend pod IPs
-- Implement round-robin selection algorithm
-- Proxy requests to selected backend using reverse proxy
-- Handle backend failures gracefully
 
 **Configuration (JSON):**
 ```json
@@ -54,597 +61,72 @@ Discovers backend pods via Kubernetes API and distributes requests using round-r
 }
 ```
 
-Namespace auto-injected via Kubernetes Downward API.
+**Responsibilities:**
+- Load configuration from `/etc/config/config.json`
+- Connect to Kubernetes API (both in-cluster and local kubeconfig)
+- Watch Endpoints for the backend service
+- Maintain list of healthy backend pod IPs
+- Implement round-robin selection algorithm
+- Proxy requests to selected backend using `httputil.ReverseProxy`
+- Handle backend failures gracefully
 
-**Should learn:**
+**Endpoints:**
+- `GET /health` - Returns health status and backend count
+- `GET /info` - Returns backend list and request stats
+- `GET /debug/next-backend` - Shows next backend selection (testing)
+- Everything else → Proxied to backends
+
+**Key learning:**
 - Kubernetes client-go library
 - Informer pattern for watching resources
 - Concurrent programming (goroutines, mutexes)
 - HTTP reverse proxy
 - RBAC concepts
 
+---
+
 ## Directory Structure
 
 ```
 go-balancer/
-├── backend/
-│   ├── cmd/
-│   │   └── backend/
-│   │       └── main.go          # Entry point - wires everything together
+├── backend/                    # ✅ COMPLETE
+│   ├── cmd/backend/main.go
 │   ├── internal/
 │   │   ├── config/
-│   │   │   ├── config.go        # Config struct and loading logic
-│   │   │   └── config_test.go   # Tests
 │   │   └── handlers/
-│   │       ├── handlers.go      # HTTP request handlers
-│   │       └── handlers_test.go # Tests
-│   ├── config.json               # Local test config
-│   ├── go.mod                    # Go module definition
-│   ├── go.sum                    # Dependency checksums
-│   └── Dockerfile
-│
-├── loadbalancer/
-│   ├── cmd/
-│   │   └── loadbalancer/
-│   │       └── main.go          # Entry point
-│   ├── internal/
-│   │   ├── config/
-│   │   │   ├── config.go        # Config loading
-│   │   │   └── config_test.go
-│   │   ├── discovery/
-│   │   │   ├── discovery.go     # Kubernetes endpoint watching
-│   │   │   └── discovery_test.go
-│   │   ├── balancer/
-│   │   │   ├── balancer.go      # Round-robin selection logic
-│   │   │   └── balancer_test.go
-│   │   └── proxy/
-│   │       ├── proxy.go         # HTTP reverse proxy handler
-│   │       └── proxy_test.go
 │   ├── config.json
 │   ├── go.mod
-│   ├── go.sum
 │   └── Dockerfile
 │
-└── k8s/
-    ├── backend-configmap.yaml
-    ├── backend-deployment.yaml
-    ├── backend-service.yaml
-    ├── loadbalancer-configmap.yaml
-    ├── loadbalancer-rbac.yaml      # ServiceAccount, Role, RoleBinding
-    ├── loadbalancer-deployment.yaml
-    └── loadbalancer-service.yaml
-```
-
-**Why this structure?**
-- `cmd/` contains entry points (main packages)
-- `internal/` contains packages that can't be imported by other projects
-- Each subdirectory is a separate package
-- Separation of concerns: config, handlers, business logic
-- Easy to test each component independently
-- This is standard Go project layout for real applications
-
-## Component Responsibilities & Contracts
-
-This section defines what each package should do and what it should expose to other parts of the system.
-
-### Backend Service Components
-
-#### `internal/config` Package
-
-**Job:**
-- Load configuration from `/etc/config/config.json`
-- Provide config data to other parts of the application
-
-**Should expose:**
-- A `Config` struct with fields: `Port` (int), `ServiceName` (string)
-- A `LoadConfig(path string)` function that returns `(*Config, error)`
-
-**Responsibilities:**
-- Read file from disk
-- Parse JSON into struct
-- Return errors if file missing or JSON invalid
-- Provide sensible defaults if needed
-
----
-
-#### `internal/handlers` Package
-
-**Job:**
-- Handle incoming HTTP requests
-- Return JSON response with pod identity information
-
-**Should expose:**
-- An HTTP handler function (signature depends on your design)
-- Could be `func Handler(w http.ResponseWriter, r *http.Request)`
-- Or `func NewHandler(podName, podIP, serviceName string)` that returns a handler
-
-**Responsibilities:**
-- Get pod metadata (from env vars or passed in)
-- Format response as JSON
-- Write response to HTTP response writer
-- Log the request
-
-**Response should contain:**
-```json
-{
-  "podName": "backend-pod-xyz",
-  "podIP": "10.244.1.5",
-  "serviceName": "backend",
-  "timestamp": "2025-11-02T10:30:00Z"
-}
+├── loadbalancer/               # 🚧 TODO
+│   ├── cmd/loadbalancer/main.go
+│   ├── internal/
+│   │   ├── config/            # Config loading
+│   │   ├── discovery/         # Kubernetes endpoint watching
+│   │   ├── balancer/          # Round-robin selection
+│   │   └── proxy/             # HTTP reverse proxy
+│   ├── config.json
+│   ├── go.mod
+│   └── Dockerfile
+│
+├── k8s/
+│   ├── namespace.yaml
+│   ├── configmap.yaml         # Backend config
+│   ├── deployment.yaml        # Backend deployment
+│   ├── service.yaml           # Backend NodePort service
+│   └── (loadbalancer manifests TODO)
+│
+├── Makefile                   # Build, test, deploy commands
+├── kind-config.yaml           # Kind cluster with NodePort mapping
+├── PROJECT_GUIDE.md           # This file
+└── LOAD_BALANCER_CONCEPTS.md  # Load balancer theory and patterns
 ```
 
 ---
 
-#### `cmd/backend/main.go`
+## Phase 2: Load Balancer Implementation
 
-**Job:**
-- Wire everything together
-- Entry point for the application
-
-**Responsibilities:**
-1. Load config using the config package
-2. Get pod metadata from environment variables (POD_NAME, POD_IP via Downward API)
-3. Set up HTTP handler with the handlers package
-4. Start HTTP server on configured port
-5. Set up logging
-6. Handle startup errors
-
-**Flow:**
-```
-main() →
-  Load config →
-  Get pod metadata from env →
-  Create handler →
-  Register handler with http server →
-  Start listening →
-  Log errors/info
-```
-
----
-
-### Load Balancer Components
-
-#### `internal/config` Package
-
-**Job:**
-- Load configuration from `/etc/config/config.json`
-
-**Should expose:**
-- A `Config` struct with: `BackendServiceName` (string), `BackendPort` (int), `Port` (int)
-- A `LoadConfig(path string)` function returning `(*Config, error)`
-
-**Responsibilities:**
-- Same as backend config package
-- Read, parse, validate, return errors
-
----
-
-#### `internal/discovery` Package
-
-**Job:**
-- Connect to Kubernetes API
-- Watch Endpoints for the backend service
-- Maintain current list of backend pod IPs
-- Notify when backends are added/removed
-
-**Should expose:**
-- A function to create the K8s client (handles in-cluster vs out-of-cluster)
-- A function/struct to start watching endpoints
-- A way to get the current list of backend addresses
-- Callback mechanism for when backends change (or a channel)
-
-**Responsibilities:**
-- Set up Kubernetes client-go
-- Create Informer for Endpoints resource
-- Set up callbacks: OnAdd, OnUpdate, OnDelete
-- Convert Endpoints object to list of "host:port" strings
-- Thread-safe access to backend list (uses mutex)
-
-**Should provide to other packages:**
-- Current list of backends as `[]string` (e.g., `["10.244.1.5:8080", "10.244.1.6:8080"]`)
-- Way to register for updates (or just poll current list)
-
----
-
-#### `internal/balancer` Package
-
-**Job:**
-- Implement round-robin selection algorithm
-- Pick which backend to send the next request to
-
-**Should expose:**
-- A struct or function that maintains round-robin state
-- A `SelectBackend(backends []string)` function that returns the next backend address
-- Thread-safe selection (uses mutex for counter)
-
-**Responsibilities:**
-- Maintain counter for round-robin position
-- Increment counter on each call
-- Wrap around when reaching end of list
-- Handle empty backend list gracefully
-- Thread-safe (multiple requests happening concurrently)
-
-**Returns:**
-- A backend address string (e.g., `"10.244.1.5:8080"`)
-- Or error if no backends available
-
----
-
-#### `internal/proxy` Package
-
-**Job:**
-- Forward HTTP requests to selected backend
-- Handle the actual proxying
-
-**Should expose:**
-- A handler function that takes backend address and forwards the request
-- Possibly `NewProxy()` that returns an http.Handler
-- Or `ProxyRequest(w, r, backendAddr)` function
-
-**Responsibilities:**
-- Use `httputil.ReverseProxy` from standard library
-- Set target backend URL
-- Forward request headers, body, method
-- Return response to client
-- Handle errors (backend down, timeout, etc.)
-- Log requests and errors
-
-**Needs:**
-- Backend address (from balancer)
-- Original request (from HTTP handler)
-- Response writer (to send response back)
-
----
-
-#### `cmd/loadbalancer/main.go`
-
-**Job:**
-- Wire all components together
-- Entry point
-
-**Responsibilities:**
-1. Load config
-2. Get namespace from environment (Downward API)
-3. Initialize Kubernetes discovery (pass namespace and service name)
-4. Start watching endpoints (runs in goroutine)
-5. Create HTTP handler that:
-   - Gets current backend list from discovery
-   - Selects backend using balancer
-   - Proxies request using proxy package
-6. Start HTTP server on configured port
-7. Handle graceful shutdown
-8. Log everything
-
-**Flow:**
-```
-main() →
-  Load config →
-  Get namespace from env →
-  Initialize K8s discovery →
-  Start endpoint watcher (goroutine) →
-  Create HTTP handler:
-    - Get backends from discovery
-    - Select one with balancer
-    - Proxy with proxy package
-  →
-  Start HTTP server →
-  Handle errors
-```
-
----
-
-### Component Interactions
-
-**Backend request flow:**
-```
-HTTP Request →
-  main (HTTP server) →
-    handlers.Handler() →
-      Returns JSON with pod info
-```
-
-**Load Balancer request flow:**
-```
-HTTP Request →
-  main (HTTP server) →
-    Get backends from discovery.GetBackends() →
-    Select backend with balancer.SelectBackend(backends) →
-    Proxy request with proxy.ProxyRequest(w, r, backend) →
-      ReverseProxy forwards to backend →
-        Backend responds →
-          Response sent to client
-```
-
-**Load Balancer background process:**
-```
-main() starts goroutine →
-  discovery.Watch() →
-    K8s Informer callbacks (OnAdd/OnUpdate/OnDelete) →
-      Updates internal backend list →
-        (main HTTP handler reads from this list)
-```
-
----
-
-### Key Data Flow Summary
-
-**Configuration:**
-- ConfigMap mounted as `/etc/config/config.json`
-- Config package reads and parses it
-- Main gets Config struct with all settings
-
-**Pod Metadata (Backend):**
-- Kubernetes Downward API injects POD_NAME, POD_IP as env vars
-- Main reads from `os.Getenv()`
-- Passes to handlers for response
-
-**Service Discovery (Load Balancer):**
-- Discovery package watches Kubernetes Endpoints
-- Maintains `[]string` of backend addresses
-- Balancer package selects one from the list
-- Proxy package forwards request to selected backend
-
-**Thread Safety:**
-- Discovery updates backend list (one goroutine)
-- HTTP handlers read backend list (many goroutines)
-- Both protected by `sync.Mutex`
-
-## Go Packages & Libraries
-
-### Backend Service
-
-**Standard library only:**
-- `net/http` - HTTP server and routing
-- `encoding/json` - JSON encoding/decoding
-- `os` - File reading, environment variables, hostname
-- `log` - Logging
-
-### Load Balancer
-
-**Standard library:**
-- `net/http` - HTTP server
-- `net/http/httputil` - ReverseProxy for forwarding requests
-- `encoding/json` - Config parsing
-- `sync` - Mutex for protecting concurrent access to backend list
-- `context` - Cancellation and timeouts
-- `log` - Logging
-
-**Kubernetes client (external):**
-- `k8s.io/client-go` - Official Kubernetes Go client
-- `k8s.io/api/core/v1` - Core Kubernetes types (Endpoints, Pods, Services)
-- `k8s.io/apimachinery/pkg/apis/meta/v1` - Metadata types
-- `k8s.io/client-go/informers` - Informer pattern for efficient watching
-- `k8s.io/client-go/tools/cache` - Caching for informers
-- `k8s.io/client-go/rest` - REST configuration (InClusterConfig)
-
-**Installing dependencies:**
-```bash
-cd loadbalancer
-go get k8s.io/client-go@latest
-go get k8s.io/api@latest
-go get k8s.io/apimachinery@latest
-```
-
-## Key Go Concepts You'll Use
-
-### 1. Structs and JSON Tags
-Define data structures and map them to JSON fields.
-
-**Concepts:**
-- Struct fields with JSON tags for marshaling/unmarshaling
-- Exported (capitalized) vs unexported (lowercase) fields
-- Pointers vs values
-
-### 2. Error Handling
-Go doesn't have exceptions - functions return errors.
-
-**Pattern:**
-```
-result, err := someFunction()
-if err != nil {
-    // handle error
-}
-// use result
-```
-
-**Concepts:**
-- Multiple return values
-- Explicit error checking
-- `log.Fatal()` for unrecoverable errors
-- Wrapping errors with context
-
-### 3. HTTP Server
-Build web servers with the standard library.
-
-**Concepts:**
-- `http.HandleFunc()` to register routes
-- `http.ResponseWriter` and `http.Request`
-- `http.ListenAndServe()` to start server
-- JSON encoding to response writer
-
-### 4. Concurrency
-Goroutines and channels for concurrent operations.
-
-**For this project:**
-- Endpoint watcher runs in a goroutine
-- Mutex protects backend list from concurrent access
-- Multiple request handlers accessing shared state
-
-**Concepts:**
-- `go functionName()` to start goroutine
-- `sync.Mutex` for protecting shared data
-- Channels for communication (maybe used in discovery)
-
-### 5. Packages and Imports
-Organize code into reusable packages.
-
-**Concepts:**
-- `package` declaration at top of each file
-- Import paths based on directory structure
-- Exported names start with capital letter
-- Import your own packages: `backend/internal/config`
-
-### 6. Interfaces
-Go's approach to polymorphism.
-
-**You'll encounter:**
-- `http.Handler` interface
-- Custom interfaces for testing (maybe)
-
-## Kubernetes Concepts
-
-### Service Discovery with Endpoints
-
-**How it works:**
-1. Your backend pods are managed by a Deployment
-2. A Service selects those pods via labels
-3. Kubernetes automatically creates/updates an Endpoints object
-4. Endpoints object contains list of pod IPs and ports
-5. Load balancer watches this Endpoints object
-6. When pods are added/removed, load balancer is notified
-
-**Informer Pattern:**
-- More efficient than polling
-- Maintains local cache of Endpoints
-- Provides callbacks: OnAdd, OnUpdate, OnDelete
-- Handles reconnection automatically
-
-### RBAC (Role-Based Access Control)
-
-Load balancer needs permission to read Endpoints.
-
-**Resources needed:**
-1. **ServiceAccount** - Identity for your pods
-2. **Role** - Defines permissions (get, list, watch endpoints)
-3. **RoleBinding** - Grants role to service account
-
-**In your deployment:**
-```yaml
-spec:
-  serviceAccountName: loadbalancer-sa
-```
-
-### Downward API
-
-Inject pod metadata as environment variables.
-
-**Example:**
-```yaml
-env:
-- name: NAMESPACE
-  valueFrom:
-    fieldRef:
-      fieldPath: metadata.namespace
-- name: POD_NAME
-  valueFrom:
-    fieldRef:
-      fieldPath: metadata.name
-```
-
-Now your app can read `os.Getenv("NAMESPACE")`.
-
-### ConfigMaps as Volumes
-
-Mount configuration files into pods.
-
-**ConfigMap:**
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: backend-config
-data:
-  config.json: |
-    {
-      "port": 8080
-    }
-```
-
-**Deployment:**
-```yaml
-volumeMounts:
-- name: config
-  mountPath: /etc/config
-  readOnly: true
-volumes:
-- name: config
-  configMap:
-    name: backend-config
-```
-
-File appears at `/etc/config/config.json` inside container.
-
-## Logging Strategy
-
-**Best practice for containers:**
-- Write all logs to stdout/stderr
-- Let Kubernetes capture and aggregate them
-- Use `kubectl logs` to view
-
-**In Go:**
-- Use standard `log` package
-- Set helpful prefix: `log.SetPrefix("[backend] ")`
-- Add flags for timestamp and file:line: `log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)`
-- Use prefixes for levels: `log.Println("[INFO] message")`
-
-**Viewing logs:**
-```bash
-kubectl logs -f deployment/backend
-kubectl logs -f deployment/loadbalancer
-kubectl logs <pod-name> --tail=50
-kubectl logs <pod-name> --previous  # Previous crash
-```
-
-## Implementation Phases
-
-### Phase 1: Backend Service
-
-#### Phase 1a: Get It Working
-**Focus: Build working backend service**
-
-1. ✅ Initialize Go module: `go mod init backend`
-2. ✅ Create directory structure (cmd/, internal/)
-3. ✅ Implement config package (load JSON from file)
-4. ✅ Write basic unit tests for config
-5. Implement handlers package (HTTP response with pod info)
-6. Write main.go to wire everything together
-7. Test locally: `go run cmd/backend/main.go`
-8. Verify handlers work with curl/browser
-
-#### Phase 1b: Polish Backend
-**Focus: Clean up and refactor before Kubernetes**
-
-1. Refactor tests to use `testdata/` directory
-2. Add testify for cleaner assertions
-   - Use `assert.Equal`, `assert.NoError`, etc. for readability
-   - Use `require` for setup that must succeed
-3. Add specific error case testing
-   - Use `assert.ErrorIs` to check for specific errors (e.g., `os.ErrNotExist`)
-   - Use `assert.ErrorAs` to check error types (e.g., `*json.UnmarshalTypeError`)
-   - Use `assert.ErrorContains` to verify error messages
-   - Test different failure modes (missing file, bad JSON, wrong types)
-4. Refactor to table-driven tests
-5. Improve error messages and logging
-6. Run full test suite and ensure 100% pass
-7. Run linter and fix all issues
-8. Code review and cleanup
-
-#### Phase 1c: Deploy to Kubernetes
-**Focus: Containerize and deploy**
-
-1. Create Dockerfile (multi-stage build)
-2. Build image and load to kind
-3. Create Kubernetes manifests (ConfigMap, Deployment, Service)
-4. Deploy: `kubectl apply -f k8s/backend-*.yaml`
-5. Test: `kubectl port-forward svc/backend-service 8080:8080`
-6. Verify pod metadata (POD_NAME, POD_IP) works correctly
-7. Scale and test multiple replicas
-
-### Phase 2: Load Balancer
-
-#### Phase 2a: Get It Working
-**Focus: Build working load balancer incrementally with testable milestones**
+### Phase 2a: Get It Working (Local Development)
 
 **Key Decisions:**
 - Config: Service name, backend port, load balancing strategy (start with round-robin only)
@@ -654,195 +136,221 @@ kubectl logs <pod-name> --previous  # Previous crash
 - Return backend errors directly to client (no retries yet)
 - Build incrementally - test each piece before moving to next
 
-**Incremental Implementation - Test Each Step!**
+---
+
+### Incremental Implementation Steps
 
 Each step should be working and testable before moving to the next. Days/weeks can pass between steps - each milestone is a clear checkpoint.
 
 ---
 
-**Step 1: Basic Server + Health Check**
-- **Goal:** Prove the load balancer starts and responds
-- **What to build:**
-  - Initialize project: `go mod init loadbalancer`
-  - Create directory structure: `cmd/loadbalancer/`, `internal/`
-  - Write `cmd/loadbalancer/main.go` - starts HTTP server on port 8080
-  - Add handler for `GET /health` → returns `200 OK` with JSON: `{"status": "healthy"}`
-- **Test it:**
-  ```bash
-  go run cmd/loadbalancer/main.go
-  curl localhost:8080/health
-  # Expected: {"status": "healthy"}
-  ```
-- **Success criteria:** ✅ Server starts, responds to health check
-- **Estimated time:** 30-60 minutes
+#### Step 1: Basic Server + Health Check
+**Goal:** Prove the load balancer starts and responds
+
+**What to build:**
+- Initialize project: `go mod init loadbalancer`
+- Create directory structure: `cmd/loadbalancer/`, `internal/`
+- Write `cmd/loadbalancer/main.go` - starts HTTP server on port 8080
+- Add handler for `GET /health` → returns `{"status": "healthy"}`
+
+**Test it:**
+```bash
+go run cmd/loadbalancer/main.go
+curl localhost:8080/health
+# Expected: {"status": "healthy"}
+```
+
+**Success criteria:** ✅ Server starts, responds to health check
+**Estimated time:** 30-60 minutes
 
 ---
 
-**Step 2: Add Config Package**
-- **Goal:** Load configuration from file or environment
-- **What to build:**
-  - Create `internal/config/` package
-  - Define `Config` struct with: `BackendServiceName`, `BackendPort`, `Port`
-  - Implement `LoadFromFile(path string)` and `LoadFromEnv()` (reuse backend pattern)
-  - Update `main.go` to load config
-  - Write basic config tests
-- **Test it:**
-  ```bash
-  # Create test config.json
-  echo '{"backendServiceName": "backend-service", "backendPort": 8080, "port": 8080}' > loadbalancer/config.json
-  go run cmd/loadbalancer/main.go
-  # Should start with config loaded
-  ```
-- **Success criteria:** ✅ Config loads from file and environment
-- **Estimated time:** 1-2 hours
+#### Step 2: Add Config Package
+**Goal:** Load configuration from file or environment
+
+**What to build:**
+- Create `internal/config/` package
+- Define `Config` struct with: `BackendServiceName`, `BackendPort`, `Port`
+- Implement `LoadFromFile(path string)` and `LoadFromEnv()` (reuse backend pattern)
+- Update `main.go` to load config
+- Write basic config tests
+
+**Test it:**
+```bash
+# Create test config.json
+echo '{"backendServiceName": "backend-service", "backendPort": 8080, "port": 8080}' > loadbalancer/config.json
+go run cmd/loadbalancer/main.go
+# Should start with config loaded
+```
+
+**Success criteria:** ✅ Config loads from file and environment
+**Estimated time:** 1-2 hours
 
 ---
 
-**Step 3: Add Discovery (Read-Only)**
-- **Goal:** Connect to Kubernetes and discover backend pods
-- **What to build:**
-  - Create `internal/discovery/` package
-  - Set up Kubernetes client (in-cluster config vs kubeconfig for local testing)
-  - Create Endpoints informer/watcher
-  - Maintain thread-safe list of backend IPs (use `sync.RWMutex`)
-  - Provide `GetBackends() []string` method
-  - Log when backends are added/removed
-  - Update `/health` to show backend count: `{"status": "healthy", "backends_available": 3}`
-- **Test it:**
-  ```bash
-  # Point at your kind cluster
-  go run cmd/loadbalancer/main.go
-  curl localhost:8080/health
-  # Expected: {"status": "healthy", "backends_available": 3}
+#### Step 3: Add Discovery (Read-Only)
+**Goal:** Connect to Kubernetes and discover backend pods
 
-  # Scale backends and watch logs
-  kubectl scale deployment/backend --replicas=5 -n go-balancer
-  # Should see discovery logs about new backends
-  ```
-- **Success criteria:** ✅ Discovers 3 backend pods, count shows in /health, reacts to scaling
-- **Estimated time:** 2-3 hours (K8s client-go has learning curve)
+**What to build:**
+- Create `internal/discovery/` package
+- Set up Kubernetes client (in-cluster config vs kubeconfig for local testing)
+- Create Endpoints informer/watcher
+- Maintain thread-safe list of backend IPs (use `sync.RWMutex`)
+- Provide `GetBackends() []string` method
+- Log when backends are added/removed
+- Update `/health` to show backend count: `{"status": "healthy", "backends_available": 3}`
 
----
+**Test it:**
+```bash
+# Point at your kind cluster
+go run cmd/loadbalancer/main.go
+curl localhost:8080/health
+# Expected: {"status": "healthy", "backends_available": 3}
 
-**Step 4: Add Info/Stats Endpoint**
-- **Goal:** Observability before forwarding requests
-- **What to build:**
-  - Add request counters to main (use `sync.Map` or mutex-protected map)
-  - Create `GET /info` endpoint showing:
-    - List of discovered backends
-    - Requests forwarded per backend (all zeros initially)
-    - Total requests
-    - Uptime
-- **Example response:**
-  ```json
-  {
-    "uptime": "2m30s",
-    "backends": [
-      {"address": "10.244.0.5:8080", "requests_forwarded": 0},
-      {"address": "10.244.0.6:8080", "requests_forwarded": 0},
-      {"address": "10.244.0.7:8080", "requests_forwarded": 0}
-    ],
-    "total_requests": 0
-  }
-  ```
-- **Test it:**
-  ```bash
-  curl localhost:8080/info | jq .
-  # Should see all discovered backends with zero counts
-  ```
-- **Success criteria:** ✅ Can see all backends and request counters
-- **Estimated time:** 1 hour
+# Scale backends and watch logs
+kubectl scale deployment/backend --replicas=5 -n go-balancer
+# Should see discovery logs about new backends
+```
+
+**Success criteria:** ✅ Discovers 3 backend pods, count shows in /health, reacts to scaling
+**Estimated time:** 2-3 hours (K8s client-go has learning curve)
 
 ---
 
-**Step 5: Add Round-Robin Selection (No Forwarding)**
-- **Goal:** Prove selection logic works before adding proxy complexity
-- **What to build:**
-  - Create `internal/balancer/` package
-  - Implement round-robin selection with counter (needs mutex)
-  - `SelectBackend(backends []string) (string, error)` - returns next backend, wraps around
-  - Add `GET /debug/next-backend` endpoint - shows which backend would be selected (doesn't forward)
-  - Write tests for balancer with mock backend lists
-- **Test it:**
-  ```bash
-  curl localhost:8080/debug/next-backend
-  # {"selected": "10.244.0.5:8080"}
-  curl localhost:8080/debug/next-backend
-  # {"selected": "10.244.0.6:8080"}
-  curl localhost:8080/debug/next-backend
-  # {"selected": "10.244.0.7:8080"}
-  curl localhost:8080/debug/next-backend
-  # {"selected": "10.244.0.5:8080"}  # wrapped around!
-  ```
-- **Success criteria:** ✅ Selection rotates through all backends in order
-- **Estimated time:** 1-2 hours
+#### Step 4: Add Info/Stats Endpoint
+**Goal:** Observability before forwarding requests
+
+**What to build:**
+- Add request counters to main (use `sync.Map` or mutex-protected map)
+- Create `GET /info` endpoint showing:
+  - List of discovered backends
+  - Requests forwarded per backend (all zeros initially)
+  - Total requests
+  - Uptime
+
+**Example response:**
+```json
+{
+  "uptime": "2m30s",
+  "backends": [
+    {"address": "10.244.0.5:8080", "requests_forwarded": 0},
+    {"address": "10.244.0.6:8080", "requests_forwarded": 0},
+    {"address": "10.244.0.7:8080", "requests_forwarded": 0}
+  ],
+  "total_requests": 0
+}
+```
+
+**Test it:**
+```bash
+curl localhost:8080/info | jq .
+# Should see all discovered backends with zero counts
+```
+
+**Success criteria:** ✅ Can see all backends and request counters
+**Estimated time:** 1 hour
 
 ---
 
-**Step 6: Add Proxy Forwarding**
-- **Goal:** Actually forward requests to backends!
-- **What to build:**
-  - Create `internal/proxy/` package
-  - Use `httputil.ReverseProxy` to forward requests
-  - Create function that takes backend address and returns configured proxy
-  - Update main HTTP handler:
-    - If path is `/health`, `/info`, or `/debug/*` → handle directly
-    - Everything else → select backend and proxy
-  - Increment request counters when forwarding
-  - Log each forwarded request (which backend)
-- **Test it:**
-  ```bash
-  # Forward a request through the LB to backend
-  curl localhost:8080/status
-  # Should see backend response with podname, etc.
+#### Step 5: Add Round-Robin Selection (No Forwarding)
+**Goal:** Prove selection logic works before adding proxy complexity
 
-  # Check stats
-  curl localhost:8080/info
-  # Should see request counts incrementing
+**What to build:**
+- Create `internal/balancer/` package
+- Implement round-robin selection with counter (needs mutex)
+- `SelectBackend(backends []string) (string, error)` - returns next backend, wraps around
+- Add `GET /debug/next-backend` endpoint - shows which backend would be selected (doesn't forward)
+- Write tests for balancer with mock backend lists
 
-  # Hit it multiple times, watch round-robin
-  for i in {1..9}; do curl -s localhost:8080/ping | jq -r .podname; done
-  # Should see all 3 backend pods in rotation
-  ```
-- **Success criteria:**
-  - ✅ Requests forwarded to backends
-  - ✅ Backend responses returned to client
-  - ✅ Counters increment in `/info`
-  - ✅ Round-robin distribution working
-- **Estimated time:** 2-3 hours
+**Test it:**
+```bash
+curl localhost:8080/debug/next-backend
+# {"selected": "10.244.0.5:8080"}
+curl localhost:8080/debug/next-backend
+# {"selected": "10.244.0.6:8080"}
+curl localhost:8080/debug/next-backend
+# {"selected": "10.244.0.7:8080"}
+curl localhost:8080/debug/next-backend
+# {"selected": "10.244.0.5:8080"}  # wrapped around!
+```
+
+**Success criteria:** ✅ Selection rotates through all backends in order
+**Estimated time:** 1-2 hours
 
 ---
 
-**Step 7: Test Locally End-to-End**
-- **Goal:** Verify full functionality before K8s deployment
-- **What to test:**
-  - Start LB locally, pointing at kind cluster
-  - Scale backends up and down, verify LB adapts
-  - Send many requests, verify distribution
-  - Check `/info` for accurate stats
-  - Kill a backend pod, verify LB handles it (may fail requests - that's OK for now)
-- **Test commands:**
-  ```bash
-  # Start LB
-  go run cmd/loadbalancer/main.go
+#### Step 6: Add Proxy Forwarding
+**Goal:** Actually forward requests to backends!
 
-  # Send requests and watch distribution
-  for i in {1..30}; do curl -s localhost:8080/ping | jq -r .podname; done | sort | uniq -c
-  # Should see roughly even distribution (10, 10, 10)
+**What to build:**
+- Create `internal/proxy/` package
+- Use `httputil.ReverseProxy` to forward requests
+- Create function that takes backend address and returns configured proxy
+- Update main HTTP handler:
+  - If path is `/health`, `/info`, or `/debug/*` → handle directly
+  - Everything else → select backend and proxy
+- Increment request counters when forwarding
+- Log each forwarded request (which backend)
 
-  # Check stats
-  curl localhost:8080/info | jq .
+**Test it:**
+```bash
+# Forward a request through the LB to backend
+curl localhost:8080/status
+# Should see backend response with podname, etc.
 
-  # Scale backends
-  kubectl scale deployment/backend --replicas=5 -n go-balancer
-  # Send more requests, should distribute across 5 backends
-  ```
-- **Success criteria:**
-  - ✅ LB discovers backends automatically
-  - ✅ Requests distributed evenly
-  - ✅ Adapts to backend scaling
-  - ✅ All endpoints working
-- **Estimated time:** 1-2 hours of testing and fixing issues
+# Check stats
+curl localhost:8080/info
+# Should see request counts incrementing
+
+# Hit it multiple times, watch round-robin
+for i in {1..9}; do curl -s localhost:8080/ping | jq -r .podname; done
+# Should see all 3 backend pods in rotation
+```
+
+**Success criteria:**
+- ✅ Requests forwarded to backends
+- ✅ Backend responses returned to client
+- ✅ Counters increment in `/info`
+- ✅ Round-robin distribution working
+
+**Estimated time:** 2-3 hours
+
+---
+
+#### Step 7: Test Locally End-to-End
+**Goal:** Verify full functionality before K8s deployment
+
+**What to test:**
+- Start LB locally, pointing at kind cluster
+- Scale backends up and down, verify LB adapts
+- Send many requests, verify distribution
+- Check `/info` for accurate stats
+- Kill a backend pod, verify LB handles it (may fail requests - that's OK for now)
+
+**Test commands:**
+```bash
+# Start LB
+go run cmd/loadbalancer/main.go
+
+# Send requests and watch distribution
+for i in {1..30}; do curl -s localhost:8080/ping | jq -r .podname; done | sort | uniq -c
+# Should see roughly even distribution (10, 10, 10)
+
+# Check stats
+curl localhost:8080/info | jq .
+
+# Scale backends
+kubectl scale deployment/backend --replicas=5 -n go-balancer
+# Send more requests, should distribute across 5 backends
+```
+
+**Success criteria:**
+- ✅ LB discovers backends automatically
+- ✅ Requests distributed evenly
+- ✅ Adapts to backend scaling
+- ✅ All endpoints working
+
+**Estimated time:** 1-2 hours of testing and fixing issues
 
 ---
 
@@ -861,8 +369,11 @@ Each step has a clear "done" state you can demonstrate:
 
 **Next:** Phase 2b - Deploy to Kubernetes
 
-#### Phase 2b: Deploy to Kubernetes
-**Focus: Containerize and deploy load balancer to kind**
+---
+
+### Phase 2b: Deploy to Kubernetes
+
+**Focus:** Containerize and deploy load balancer to kind
 
 **Steps:**
 1. Create Dockerfile (multi-stage build like backend)
@@ -879,8 +390,11 @@ Each step has a clear "done" state you can demonstrate:
 11. Scale backends and watch load balancer adapt
 12. Check logs to see endpoint discovery working
 
-#### Phase 2c: Polish & Testing (Optional)
-**Focus: Add tests and improvements**
+---
+
+### Phase 2c: Polish & Testing (Optional)
+
+**Focus:** Add tests and improvements
 
 **Steps:**
 1. Add unit tests for all packages
@@ -891,10 +405,13 @@ Each step has a clear "done" state you can demonstrate:
 6. Add request retry logic (try different backend on failure)
 7. Add circuit breaker (stop sending to failing backends)
 
-### Phase 3: Advanced Features & Enhancements
+---
 
-#### Phase 3a: Shared Libraries & Refactoring (Planned)
-**Focus: Extract common code into shared packages**
+## Phase 3: Enhancements & Shared Libraries
+
+### Phase 3a: Shared Libraries & Refactoring (Planned)
+
+**Focus:** Extract common code into shared packages
 
 **Motivation:**
 - Both backend and loadbalancer have similar config loading logic
@@ -971,6 +488,9 @@ go-balancer/
 - **Go package visibility:** `pkg/` vs `internal/` (public vs private packages)
 - **Interface design:** Creating flexible, reusable interfaces
 - **Generics:** Using `interface{}` or Go 1.18+ generics for type-safe config loading
+- **Struct tags:** Using tags for metadata (`json:"port" env:"BACKEND_PORT"`)
+- **Reflection:** Reading struct tags at runtime to map env vars to fields
+- **12-factor app methodology:** Configuration via environment for cloud-native apps
 - **Refactoring safely:** Making changes without breaking existing functionality
 - **Dependency management:** How packages import each other
 - **When to abstract:** Balance between DRY (Don't Repeat Yourself) and simplicity
@@ -978,12 +498,17 @@ go-balancer/
 **Key decisions to make:**
 - Use `interface{}` (classic Go) or generics `[T any]` (Go 1.18+)?
 - How much validation belongs in shared package vs component-specific?
-- Should environment variable loading be shared too?
 - Add config validation interface? (e.g., `Validator` interface with `Validate() error`)
+- How to handle type conversion from env vars (strings) to struct fields (int, bool, etc.)?
+- Should config file paths be configurable? Search multiple locations? (`./config.json`, `/etc/config/config.json`)
+- Naming convention for env vars: `PREFIX_FIELD_NAME` or `PREFIX__NESTED__FIELD`?
 
 **Success criteria:**
 - ✅ Both backend and loadbalancer use shared config loader
 - ✅ No duplicated config loading logic
+- ✅ Config loads from file by default
+- ✅ Environment variables override file values when set
+- ✅ Can run with env vars only (no config file)
 - ✅ All existing tests still pass
 - ✅ Code is cleaner and more maintainable
 - ✅ You understand when to create shared packages vs keeping code separate
@@ -994,94 +519,173 @@ go-balancer/
 
 ---
 
-#### Other Enhancement Ideas
+### Other Enhancement Ideas
 
-- Health checking backends
+- **Health checking backends**
   - Active health checks from load balancer
   - Remove unhealthy backends from rotation
   - Configurable health check intervals
-- Multiple load balancer replicas
+
+- **Multiple load balancer replicas**
   - Handle multiple LB instances
   - Consider shared state or accept independent round-robin counters
-- Weighted round-robin based on load
+
+- **Weighted round-robin based on load**
   - Track backend response times or active connections
   - Send more traffic to less-loaded backends
   - Add `/load` endpoint to artificially increase backend load for testing
-- Persistent round-robin counter
+
+- **Persistent round-robin counter**
   - Use Redis or database to track state
   - Survive load balancer restarts
   - Coordinate across multiple LB replicas
-- Logging package/wrapper for consistent logging
+
+- **Logging package/wrapper**
   - Control log levels via config (DEBUG, INFO, WARN, ERROR)
   - Structured logging with `slog` (stdlib since Go 1.21)
   - Optional JSON output for log aggregators
-  - Good learning experience for package design patterns
-  - Could also be a shared package in `pkg/logging/`
-- Metrics and observability (Prometheus)
+  - Could be a shared package in `pkg/logging/`
+
+- **Metrics and observability (Prometheus)**
   - Request counts, latency histograms
   - Backend health status
   - Expose `/metrics` endpoint
-- Graceful shutdown handling
+
+- **Graceful shutdown handling**
   - Drain in-flight requests before shutdown
   - Handle SIGTERM properly
-- Request retry logic
+
+- **Request retry logic**
   - Retry failed requests to different backend
   - Configurable retry attempts and backoff
-- Circuit breaker pattern
+
+- **Circuit breaker pattern**
   - Temporarily stop sending to failing backends
   - Auto-recover when backend is healthy
 
-## Testing Your Load Balancer
+---
 
-**Terminal setup:**
+## Go Packages & Libraries
+
+### Load Balancer Dependencies
+
+**Standard library:**
+- `net/http` - HTTP server
+- `net/http/httputil` - ReverseProxy for forwarding requests
+- `encoding/json` - Config parsing
+- `sync` - Mutex for protecting concurrent access to backend list
+- `context` - Cancellation and timeouts
+- `log` - Logging
+
+**Kubernetes client (external):**
+- `k8s.io/client-go` - Official Kubernetes Go client
+- `k8s.io/api/core/v1` - Core Kubernetes types (Endpoints, Pods, Services)
+- `k8s.io/apimachinery/pkg/apis/meta/v1` - Metadata types
+- `k8s.io/client-go/informers` - Informer pattern for efficient watching
+- `k8s.io/client-go/tools/cache` - Caching for informers
+- `k8s.io/client-go/rest` - REST configuration (InClusterConfig)
+
+**Installing dependencies:**
 ```bash
-# Terminal 1: Watch load balancer logs
-kubectl logs -f deployment/loadbalancer
-
-# Terminal 2: Watch backend logs
-kubectl logs -f -l app=backend
-
-# Terminal 3: Send requests
-kubectl port-forward svc/loadbalancer-service 8080:8080
-# Then: curl http://localhost:8080/
+cd loadbalancer
+go get k8s.io/client-go@latest
+go get k8s.io/api@latest
+go get k8s.io/apimachinery@latest
 ```
 
-**Test scenarios:**
-```bash
-# Scale backends
-kubectl scale deployment/backend --replicas=5
+---
 
-# Watch load balancer discover new pods
-# Send requests and see distribution
+## Key Go Concepts You'll Use
 
-# Delete a pod
-kubectl delete pod <backend-pod-name>
+### 1. Error Handling
+Go doesn't have exceptions - functions return errors.
 
-# Watch load balancer handle it
-# Send requests - should still work
-
-# Scale down
-kubectl scale deployment/backend --replicas=2
-
-# Verify load balancer removes old endpoints
+**Pattern:**
+```go
+result, err := someFunction()
+if err != nil {
+    // handle error
+}
+// use result
 ```
 
-## kind Cluster Setup
+### 2. Concurrency
+Goroutines and channels for concurrent operations.
 
-```bash
-# Install kind (if not already)
-# https://kind.sigs.k8s.io/docs/user/quick-start/
+**For this project:**
+- Endpoint watcher runs in a goroutine
+- Mutex protects backend list from concurrent access
+- Multiple request handlers accessing shared state
 
-# Create cluster
-kind create cluster --name loadbalancer-learning
+**Concepts:**
+- `go functionName()` to start goroutine
+- `sync.Mutex` for protecting shared data
+- Channels for communication (maybe used in discovery)
 
-# Verify
-kubectl cluster-info --context kind-loadbalancer-learning
+### 3. Interfaces
+Go's approach to polymorphism.
 
-# Load images to kind (after building)
-kind load docker-image backend:latest --name loadbalancer-learning
-kind load docker-image loadbalancer:latest --name loadbalancer-learning
+**You'll encounter:**
+- `http.Handler` interface
+- Custom interfaces for testing (maybe)
+
+---
+
+## Kubernetes Concepts
+
+### Service Discovery with Endpoints
+
+**How it works:**
+1. Your backend pods are managed by a Deployment
+2. A Service selects those pods via labels
+3. Kubernetes automatically creates/updates an Endpoints object
+4. Endpoints object contains list of pod IPs and ports
+5. Load balancer watches this Endpoints object
+6. When pods are added/removed, load balancer is notified
+
+**Informer Pattern:**
+- More efficient than polling
+- Maintains local cache of Endpoints
+- Provides callbacks: OnAdd, OnUpdate, OnDelete
+- Handles reconnection automatically
+
+### RBAC (Role-Based Access Control)
+
+Load balancer needs permission to read Endpoints.
+
+**Resources needed:**
+1. **ServiceAccount** - Identity for your pods
+2. **Role** - Defines permissions (get, list, watch endpoints)
+3. **RoleBinding** - Grants role to service account
+
+**In your deployment:**
+```yaml
+spec:
+  serviceAccountName: loadbalancer-sa
 ```
+
+### Downward API
+
+Inject pod metadata as environment variables.
+
+**Example:**
+```yaml
+env:
+- name: NAMESPACE
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.namespace
+```
+
+Now your app can read `os.Getenv("NAMESPACE")`.
+
+### ConfigMaps as Volumes
+
+Mount configuration files into pods.
+
+File appears at `/etc/config/config.json` inside container.
+
+---
 
 ## Useful Commands
 
@@ -1090,30 +694,68 @@ kind load docker-image loadbalancer:latest --name loadbalancer-learning
 go mod init <name>          # Initialize module
 go get <package>            # Add dependency
 go mod tidy                 # Clean up dependencies
-go run cmd/backend/main.go  # Run application
+go run cmd/loadbalancer/main.go  # Run application
 go test ./...               # Run all tests
 go test -v ./internal/config # Run specific package tests
-go build -o backend cmd/backend/main.go  # Build binary
+go build -o loadbalancer cmd/loadbalancer/main.go  # Build binary
 ```
 
-**Docker:**
+**Makefile:**
 ```bash
-docker build -t backend:latest backend/
-docker build -t loadbalancer:latest loadbalancer/
-kind load docker-image backend:latest --name <cluster-name>
+make help                   # Show all available targets
+make run                    # Run backend service
+make test                   # Run tests
+make lint                   # Run linter
+make build                  # Build binary
+make docker-build           # Build Docker image
+make kind                   # Create/use kind cluster
+make k8s-deploy-backend     # Deploy backend
+make k8s-status             # Show K8s status
+make k8s-test               # Test backend endpoints
 ```
 
 **Kubernetes:**
 ```bash
-kubectl apply -f k8s/                    # Apply all manifests
-kubectl get pods                         # List pods
-kubectl get svc                          # List services
-kubectl get endpoints backend-service    # See discovered endpoints
-kubectl logs -f <pod-name>              # Follow logs
-kubectl describe pod <pod-name>         # Detailed pod info
-kubectl port-forward svc/<name> 8080:8080  # Access service locally
-kubectl delete -f k8s/                  # Clean up
+kubectl get pods -n go-balancer              # List pods
+kubectl get svc -n go-balancer               # List services
+kubectl get endpoints backend-service -n go-balancer  # See discovered endpoints
+kubectl logs -f <pod-name> -n go-balancer   # Follow logs
+kubectl describe pod <pod-name> -n go-balancer  # Detailed pod info
+kubectl scale deployment/backend --replicas=5 -n go-balancer  # Scale backends
 ```
+
+---
+
+## Testing Your Load Balancer
+
+**Terminal setup:**
+```bash
+# Terminal 1: Watch load balancer logs
+kubectl logs -f deployment/loadbalancer -n go-balancer
+
+# Terminal 2: Watch backend logs
+kubectl logs -f -l app=backend -n go-balancer
+
+# Terminal 3: Send requests
+curl localhost:30081/
+```
+
+**Test scenarios:**
+```bash
+# Scale backends up
+kubectl scale deployment/backend --replicas=5 -n go-balancer
+# Watch LB discover new pods, send requests, see distribution
+
+# Delete a pod
+kubectl delete pod <backend-pod-name> -n go-balancer
+# Watch LB handle it, requests should still work
+
+# Scale down
+kubectl scale deployment/backend --replicas=2 -n go-balancer
+# Verify LB removes old endpoints
+```
+
+---
 
 ## Common Go Gotchas (Coming from Python)
 
@@ -1127,6 +769,8 @@ kubectl delete -f k8s/                  # Clean up
 8. **Range returns copies** - Modifying loop variable doesn't affect original
 9. **Goroutines aren't free** - Don't spawn millions without thinking
 10. **Zero values** - Variables have default values (0, "", false, nil)
+
+---
 
 ## Resources
 
@@ -1144,31 +788,22 @@ kubectl delete -f k8s/                  # Clean up
 - ConfigMaps: https://kubernetes.io/docs/concepts/configuration/configmap/
 - RBAC: https://kubernetes.io/docs/reference/access-authn-authz/rbac/
 
-## Questions to Consider While Building
-
-1. What happens when all backends are down?
-2. Should the round-robin counter be per-request or maintained across requests?
-3. How do you handle backends being added while requests are in-flight?
-4. What happens if the Kubernetes API connection drops?
-5. Should you remove backends immediately on delete, or wait for failures?
-6. How do you test the load balancer behavior without deploying to Kubernetes?
-7. What information should be in logs for debugging?
-8. Should configuration changes require pod restart?
+---
 
 ## Success Criteria
 
-**Phase 1 Complete:**
-- ✅ Backend pods running in kind
-- ✅ Can curl backend and get pod name in response
-- ✅ Different replicas return different pod names
-- ✅ Configuration loaded from ConfigMap
+**Phase 1 Complete:** ✅
+- Backend pods running in kind
+- Can curl backend and get pod name in response
+- Different replicas return different pod names
+- Configuration loaded from ConfigMap
 
-**Phase 2 Complete:**
-- ✅ Load balancer discovers backend endpoints automatically
-- ✅ Requests distributed evenly across backends (check logs)
-- ✅ Scaling backends up/down updates load balancer dynamically
-- ✅ Deleting backend pods doesn't break load balancer
-- ✅ All components log clearly to stdout
+**Phase 2 Complete:** 🚧
+- Load balancer discovers backend endpoints automatically
+- Requests distributed evenly across backends (check logs)
+- Scaling backends up/down updates load balancer dynamically
+- Deleting backend pods doesn't break load balancer
+- All components log clearly to stdout
 
 ---
 
