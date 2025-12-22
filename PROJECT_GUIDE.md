@@ -643,26 +643,359 @@ kubectl logs <pod-name> --previous  # Previous crash
 
 ### Phase 2: Load Balancer
 
+#### Phase 2a: Get It Working
+**Focus: Build working load balancer incrementally with testable milestones**
+
+**Key Decisions:**
+- Config: Service name, backend port, load balancing strategy (start with round-robin only)
+- Config changes require manual pod restart (no hot-reload yet)
+- Stream requests through without parsing/re-encoding
+- Handle own routes (/health, /info, /debug) but proxy everything else
+- Return backend errors directly to client (no retries yet)
+- Build incrementally - test each piece before moving to next
+
+**Incremental Implementation - Test Each Step!**
+
+Each step should be working and testable before moving to the next. Days/weeks can pass between steps - each milestone is a clear checkpoint.
+
+---
+
+**Step 1: Basic Server + Health Check**
+- **Goal:** Prove the load balancer starts and responds
+- **What to build:**
+  - Initialize project: `go mod init loadbalancer`
+  - Create directory structure: `cmd/loadbalancer/`, `internal/`
+  - Write `cmd/loadbalancer/main.go` - starts HTTP server on port 8080
+  - Add handler for `GET /health` → returns `200 OK` with JSON: `{"status": "healthy"}`
+- **Test it:**
+  ```bash
+  go run cmd/loadbalancer/main.go
+  curl localhost:8080/health
+  # Expected: {"status": "healthy"}
+  ```
+- **Success criteria:** ✅ Server starts, responds to health check
+- **Estimated time:** 30-60 minutes
+
+---
+
+**Step 2: Add Config Package**
+- **Goal:** Load configuration from file or environment
+- **What to build:**
+  - Create `internal/config/` package
+  - Define `Config` struct with: `BackendServiceName`, `BackendPort`, `Port`
+  - Implement `LoadFromFile(path string)` and `LoadFromEnv()` (reuse backend pattern)
+  - Update `main.go` to load config
+  - Write basic config tests
+- **Test it:**
+  ```bash
+  # Create test config.json
+  echo '{"backendServiceName": "backend-service", "backendPort": 8080, "port": 8080}' > loadbalancer/config.json
+  go run cmd/loadbalancer/main.go
+  # Should start with config loaded
+  ```
+- **Success criteria:** ✅ Config loads from file and environment
+- **Estimated time:** 1-2 hours
+
+---
+
+**Step 3: Add Discovery (Read-Only)**
+- **Goal:** Connect to Kubernetes and discover backend pods
+- **What to build:**
+  - Create `internal/discovery/` package
+  - Set up Kubernetes client (in-cluster config vs kubeconfig for local testing)
+  - Create Endpoints informer/watcher
+  - Maintain thread-safe list of backend IPs (use `sync.RWMutex`)
+  - Provide `GetBackends() []string` method
+  - Log when backends are added/removed
+  - Update `/health` to show backend count: `{"status": "healthy", "backends_available": 3}`
+- **Test it:**
+  ```bash
+  # Point at your kind cluster
+  go run cmd/loadbalancer/main.go
+  curl localhost:8080/health
+  # Expected: {"status": "healthy", "backends_available": 3}
+
+  # Scale backends and watch logs
+  kubectl scale deployment/backend --replicas=5 -n go-balancer
+  # Should see discovery logs about new backends
+  ```
+- **Success criteria:** ✅ Discovers 3 backend pods, count shows in /health, reacts to scaling
+- **Estimated time:** 2-3 hours (K8s client-go has learning curve)
+
+---
+
+**Step 4: Add Info/Stats Endpoint**
+- **Goal:** Observability before forwarding requests
+- **What to build:**
+  - Add request counters to main (use `sync.Map` or mutex-protected map)
+  - Create `GET /info` endpoint showing:
+    - List of discovered backends
+    - Requests forwarded per backend (all zeros initially)
+    - Total requests
+    - Uptime
+- **Example response:**
+  ```json
+  {
+    "uptime": "2m30s",
+    "backends": [
+      {"address": "10.244.0.5:8080", "requests_forwarded": 0},
+      {"address": "10.244.0.6:8080", "requests_forwarded": 0},
+      {"address": "10.244.0.7:8080", "requests_forwarded": 0}
+    ],
+    "total_requests": 0
+  }
+  ```
+- **Test it:**
+  ```bash
+  curl localhost:8080/info | jq .
+  # Should see all discovered backends with zero counts
+  ```
+- **Success criteria:** ✅ Can see all backends and request counters
+- **Estimated time:** 1 hour
+
+---
+
+**Step 5: Add Round-Robin Selection (No Forwarding)**
+- **Goal:** Prove selection logic works before adding proxy complexity
+- **What to build:**
+  - Create `internal/balancer/` package
+  - Implement round-robin selection with counter (needs mutex)
+  - `SelectBackend(backends []string) (string, error)` - returns next backend, wraps around
+  - Add `GET /debug/next-backend` endpoint - shows which backend would be selected (doesn't forward)
+  - Write tests for balancer with mock backend lists
+- **Test it:**
+  ```bash
+  curl localhost:8080/debug/next-backend
+  # {"selected": "10.244.0.5:8080"}
+  curl localhost:8080/debug/next-backend
+  # {"selected": "10.244.0.6:8080"}
+  curl localhost:8080/debug/next-backend
+  # {"selected": "10.244.0.7:8080"}
+  curl localhost:8080/debug/next-backend
+  # {"selected": "10.244.0.5:8080"}  # wrapped around!
+  ```
+- **Success criteria:** ✅ Selection rotates through all backends in order
+- **Estimated time:** 1-2 hours
+
+---
+
+**Step 6: Add Proxy Forwarding**
+- **Goal:** Actually forward requests to backends!
+- **What to build:**
+  - Create `internal/proxy/` package
+  - Use `httputil.ReverseProxy` to forward requests
+  - Create function that takes backend address and returns configured proxy
+  - Update main HTTP handler:
+    - If path is `/health`, `/info`, or `/debug/*` → handle directly
+    - Everything else → select backend and proxy
+  - Increment request counters when forwarding
+  - Log each forwarded request (which backend)
+- **Test it:**
+  ```bash
+  # Forward a request through the LB to backend
+  curl localhost:8080/status
+  # Should see backend response with podname, etc.
+
+  # Check stats
+  curl localhost:8080/info
+  # Should see request counts incrementing
+
+  # Hit it multiple times, watch round-robin
+  for i in {1..9}; do curl -s localhost:8080/ping | jq -r .podname; done
+  # Should see all 3 backend pods in rotation
+  ```
+- **Success criteria:**
+  - ✅ Requests forwarded to backends
+  - ✅ Backend responses returned to client
+  - ✅ Counters increment in `/info`
+  - ✅ Round-robin distribution working
+- **Estimated time:** 2-3 hours
+
+---
+
+**Step 7: Test Locally End-to-End**
+- **Goal:** Verify full functionality before K8s deployment
+- **What to test:**
+  - Start LB locally, pointing at kind cluster
+  - Scale backends up and down, verify LB adapts
+  - Send many requests, verify distribution
+  - Check `/info` for accurate stats
+  - Kill a backend pod, verify LB handles it (may fail requests - that's OK for now)
+- **Test commands:**
+  ```bash
+  # Start LB
+  go run cmd/loadbalancer/main.go
+
+  # Send requests and watch distribution
+  for i in {1..30}; do curl -s localhost:8080/ping | jq -r .podname; done | sort | uniq -c
+  # Should see roughly even distribution (10, 10, 10)
+
+  # Check stats
+  curl localhost:8080/info | jq .
+
+  # Scale backends
+  kubectl scale deployment/backend --replicas=5 -n go-balancer
+  # Send more requests, should distribute across 5 backends
+  ```
+- **Success criteria:**
+  - ✅ LB discovers backends automatically
+  - ✅ Requests distributed evenly
+  - ✅ Adapts to backend scaling
+  - ✅ All endpoints working
+- **Estimated time:** 1-2 hours of testing and fixing issues
+
+---
+
+**Summary of Step Boundaries:**
+
+Each step has a clear "done" state you can demonstrate:
+1. Health check responds ← **Start here**
+2. Config loads successfully
+3. Backends discovered and counted
+4. Stats endpoint shows backends
+5. Round-robin selection rotates
+6. Requests actually proxied
+7. Full local testing complete ← **End of Phase 2a**
+
+**Total estimated time:** 10-15 hours (spread over days/weeks as needed)
+
+**Next:** Phase 2b - Deploy to Kubernetes
+
+#### Phase 2b: Deploy to Kubernetes
+**Focus: Containerize and deploy load balancer to kind**
+
 **Steps:**
-1. Initialize Go module: `go mod init loadbalancer`
-2. Create directory structure
-3. Implement config package
-4. Implement discovery package (K8s client setup, Endpoints informer)
-5. Implement balancer package (round-robin algorithm)
-6. Implement proxy package (reverse proxy handler)
-7. Write main.go
-8. Test locally (point at kind cluster with kubeconfig)
-9. Write unit tests
-10. Create Dockerfile
-11. Build and load to kind
-12. Create RBAC manifests
-13. Create ConfigMap, Deployment, Service manifests
-14. Deploy: `kubectl apply -f k8s/loadbalancer-*.yaml`
-15. Expose with NodePort and test
+1. Create Dockerfile (multi-stage build like backend)
+2. Build image: `docker build -t loadbalancer:latest loadbalancer/`
+3. Load to kind: `kind load docker-image loadbalancer:latest --name go-balancer`
+4. Create RBAC manifests (ServiceAccount, Role, RoleBinding)
+   - Permissions needed: `get`, `list`, `watch` on `endpoints`
+5. Create ConfigMap for load balancer config
+6. Create Deployment manifest (use ServiceAccount, mount ConfigMap, inject NAMESPACE)
+7. Create Service manifest (NodePort on different port, e.g., 30081)
+8. Deploy: `kubectl apply -f k8s/loadbalancer-*.yaml`
+9. Test via NodePort: `curl localhost:30081/`
+10. Verify requests go through to backends
+11. Scale backends and watch load balancer adapt
+12. Check logs to see endpoint discovery working
+
+#### Phase 2c: Polish & Testing (Optional)
+**Focus: Add tests and improvements**
+
+**Steps:**
+1. Add unit tests for all packages
+2. Add integration tests (mock Kubernetes API)
+3. Improve error messages and logging
+4. Add metrics/observability (request counts, backend health)
+5. Add multiple load balancing strategies (weighted, least-connections)
+6. Add request retry logic (try different backend on failure)
+7. Add circuit breaker (stop sending to failing backends)
 
 ### Phase 3: Advanced Features & Enhancements
 
-**Ideas:**
+#### Phase 3a: Shared Libraries & Refactoring (Planned)
+**Focus: Extract common code into shared packages**
+
+**Motivation:**
+- Both backend and loadbalancer have similar config loading logic
+- Only the config structure differs, the loading mechanism is the same
+- Good opportunity to learn Go package design and interfaces
+- Don't touch Phase 1 backend yet - wait until both components are working
+
+**What to refactor:**
+- Config loading logic (LoadFromFile, LoadFromEnv patterns)
+- Handlers are unique enough - keep separate
+- Possibly logging setup/utilities
+
+**New directory structure:**
+```
+go-balancer/
+├── pkg/                        # Shared packages (can be imported by others)
+│   └── config/
+│       ├── loader.go          # Generic config loading logic
+│       └── loader_test.go
+├── backend/
+│   ├── internal/
+│   │   └── config/
+│   │       ├── config.go      # Backend-specific Config struct
+│   │       └── config_test.go # Now uses pkg/config/Loader
+├── loadbalancer/
+│   ├── internal/
+│   │   └── config/
+│   │       ├── config.go      # LoadBalancer-specific Config struct
+│   │       └── config_test.go # Now uses pkg/config/Loader
+```
+
+**Implementation approach:**
+
+1. **Define interface in `pkg/config/loader.go`:**
+   - Interface for unmarshaling config (works with any struct)
+   - Function: `Load(target interface{}, options ...Option) error`
+   - Implements layered config loading:
+     1. Start with zero values
+     2. Load from first config file found (check multiple paths)
+     3. Override with environment variables (if set)
+   - All the common JSON parsing, file reading, error handling
+   - Environment variable naming: `PREFIX_FIELD_NAME` (e.g., `BACKEND_PORT=8080`)
+
+2. **Config loading order (12-factor app pattern):**
+   ```
+   Defaults → Config File → Environment Variables
+   (lowest priority)              (highest priority)
+   ```
+   - **Example:** Backend config has `port: 8080` in file, but `BACKEND_PORT=9090` env var set → uses `9090`
+   - **Why:** Allows base config in files, overrides for different environments (dev/staging/prod)
+   - **Use case:** Same Docker image, different config per environment via env vars
+
+3. **Update backend's `internal/config/config.go`:**
+   - Keep `Config` struct (backend-specific)
+   - Add struct tags for env var mapping: `json:"port" env:"BACKEND_PORT"`
+   - Use `pkg/config.Load()` instead of custom implementation
+   - Cleaner, less duplicated code
+
+4. **Update loadbalancer's `internal/config/config.go`:**
+   - Keep `Config` struct (loadbalancer-specific)
+   - Add struct tags for env var mapping: `json:"port" env:"LOADBALANCER_PORT"`
+   - Use same `pkg/config.Load()` with different prefix
+   - Consistent behavior across components
+
+5. **Write tests:**
+   - Test generic loader with various struct types
+   - Test file-only loading
+   - Test env var overrides (file + env vars)
+   - Test env-only loading (no file)
+   - Test both backend and loadbalancer configs still work
+   - Ensure no regressions
+
+**Learning opportunities:**
+- **Go package visibility:** `pkg/` vs `internal/` (public vs private packages)
+- **Interface design:** Creating flexible, reusable interfaces
+- **Generics:** Using `interface{}` or Go 1.18+ generics for type-safe config loading
+- **Refactoring safely:** Making changes without breaking existing functionality
+- **Dependency management:** How packages import each other
+- **When to abstract:** Balance between DRY (Don't Repeat Yourself) and simplicity
+
+**Key decisions to make:**
+- Use `interface{}` (classic Go) or generics `[T any]` (Go 1.18+)?
+- How much validation belongs in shared package vs component-specific?
+- Should environment variable loading be shared too?
+- Add config validation interface? (e.g., `Validator` interface with `Validate() error`)
+
+**Success criteria:**
+- ✅ Both backend and loadbalancer use shared config loader
+- ✅ No duplicated config loading logic
+- ✅ All existing tests still pass
+- ✅ Code is cleaner and more maintainable
+- ✅ You understand when to create shared packages vs keeping code separate
+
+**Estimated time:** 3-5 hours (includes learning about package design patterns)
+
+**Note:** Don't start this until Phase 2b is complete and both components are deployed and working. Refactoring is easier when you have working code to test against!
+
+---
+
+#### Other Enhancement Ideas
+
 - Health checking backends
   - Active health checks from load balancer
   - Remove unhealthy backends from rotation
@@ -683,6 +1016,7 @@ kubectl logs <pod-name> --previous  # Previous crash
   - Structured logging with `slog` (stdlib since Go 1.21)
   - Optional JSON output for log aggregators
   - Good learning experience for package design patterns
+  - Could also be a shared package in `pkg/logging/`
 - Metrics and observability (Prometheus)
   - Request counts, latency histograms
   - Backend health status
