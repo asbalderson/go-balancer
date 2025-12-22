@@ -1,0 +1,6 @@
+{
+    "backendname": "load",
+    "backendport": 8080,
+    "loadbalancerport": 8080,
+    "loadbalancermethod": "RoundRobin"
+}

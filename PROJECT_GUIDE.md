@@ -420,9 +420,34 @@ Each step has a clear "done" state you can demonstrate:
 - Don't touch Phase 1 backend yet - wait until both components are working
 
 **What to refactor:**
-- Config loading logic (LoadFromFile, LoadFromEnv patterns)
-- Handlers are unique enough - keep separate
-- Possibly logging setup/utilities
+
+**Observed duplications (after building balancer):**
+- `main.go` is 95% identical between backend and balancer
+  - Config loading logic (lines 14-35)
+  - Server setup (lines 42-52)
+  - Only differs in which handler is created
+- `getPodName()` - identical in both handlers
+- `writeJSON()` - identical in both handlers
+- `LoadFromFile()` / `LoadFromEnv()` - same pattern, just different field names
+
+**Extraction candidates:**
+
+1. **pkg/config/** (high priority)
+   - Config file/env loading logic
+   - Layered loading (file → env var overrides)
+   - Common validation patterns
+
+2. **pkg/httputil/** or **pkg/handlers/** (medium priority)
+   - `writeJSON(w, status, data)` helper
+   - `getPodName()` / `getPodIP()` helpers (from Downward API)
+   - Error response helpers
+
+3. **pkg/server/** (low priority - consider later)
+   - Server creation with standard timeouts
+   - Graceful shutdown logic (when added)
+   - Signal handling
+
+**Note:** Handlers themselves are unique enough - keep separate. The endpoints and business logic differ between backend and balancer, only the utilities are duplicated.
 
 **New directory structure:**
 ```
@@ -514,6 +539,11 @@ go-balancer/
 - ✅ You understand when to create shared packages vs keeping code separate
 
 **Estimated time:** 3-5 hours (includes learning about package design patterns)
+
+**Known issues to address during Phase 3a:**
+- Balancer tests need updating to reflect current code
+- Missing struct tag issue fixed (json struct tags had spaces)
+- validate() error now properly checked and returned
 
 **Note:** Don't start this until Phase 2b is complete and both components are deployed and working. Refactoring is easier when you have working code to test against!
 
