@@ -1,0 +1,35 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+backend
+
+# Test files
+*.test
+*.out
+coverage.txt
+*.coverprofile
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Vendor directory
+vendor/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
