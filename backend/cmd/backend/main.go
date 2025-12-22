@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"backend/internal/config"
@@ -12,11 +11,29 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load("config.json")
-	if err != nil {
-		fmt.Printf("its broked, %v\n", err)
-		os.Exit(1)
+	paths := []string{
+		"/etc/backend/config.json",
+		"config.json",
 	}
+	var cfg *config.Config
+	var err error
+
+	for _, path := range paths {
+		cfg, err = config.LoadFromFile(path)
+		if err == nil {
+			log.Printf("Loaded config from %s", path)
+			break
+		}
+	}
+
+	if err != nil {
+		cfg, err = config.LoadFromEnv()
+	}
+
+	if err != nil {
+		log.Fatal("Failed to load a config from any path or env")
+	}
+
 	fmt.Printf("We loaded the config from main: %v\n", cfg)
 
 	handler := handlers.NewServiceHandler(cfg.ServiceName)
