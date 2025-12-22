@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: go-balancer
+data:
+  config.json: |
+    {
+      "port": 8080,
+      "name": "backend-service"
+    }

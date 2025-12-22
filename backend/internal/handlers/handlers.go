@@ -20,12 +20,25 @@ type PingResponse struct {
 	ServiceName string `json:"servicename"`
 	Timestamp   string `json:"timestamp"`
 	Count       int64  `json:"count"`
+	PodName     string `json:"podname"`
 }
 
 type ServiceHandler struct {
 	ServiceName string
 	StartTime   string
 	Count       int64
+}
+
+func getPodName() string {
+	podname, ok := os.LookupEnv("POD_NAME")
+	if !ok {
+		hostname, err := os.Hostname()
+		if err != nil {
+			hostname = "unknown"
+		}
+		podname = hostname
+	}
+	return podname
 }
 
 func NewServiceHandler(serviceName string) *ServiceHandler {
@@ -41,17 +54,10 @@ func (s ServiceHandler) Register(mux *http.ServeMux) {
 }
 
 func (s *ServiceHandler) status(w http.ResponseWriter, r *http.Request) {
-	podname, podok := os.LookupEnv("POD_NAME")
-	if !podok {
-		hostname, err := os.Hostname()
-		if err != nil {
-			hostname = "unknown"
-		}
-		podname = hostname
-	}
+	podname := getPodName()
 
-	podip, ipok := os.LookupEnv("POD_IP")
-	if !ipok {
+	podip, ok := os.LookupEnv("POD_IP")
+	if !ok {
 		podip = "127.0.0.1"
 	}
 
@@ -68,6 +74,7 @@ func (s *ServiceHandler) ping(w http.ResponseWriter, r *http.Request) {
 	count := atomic.AddInt64(&s.Count, 1)
 	response := PingResponse{
 		ServiceName: s.ServiceName,
+		PodName:     getPodName(),
 		Timestamp:   time.Now().Format(time.RFC3339),
 		Count:       count,
 	}
