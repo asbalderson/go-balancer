@@ -11,7 +11,7 @@ RUN go mod download || true
 COPY . .
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o backend cmd/backend/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o balancer cmd/balancer/main.go
 
 # Final stage
 FROM alpine:latest
@@ -21,7 +21,7 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /app
 
 # Copy the binary from builder
-COPY --from=builder /build/backend .
+COPY --from=builder /build/balancer .
 
 # Copy config file (will be overridden by ConfigMap in K8s)
 COPY config.json .
@@ -30,4 +30,4 @@ COPY config.json .
 EXPOSE 8080
 
 # Run the binary
-CMD ["./backend"]
+CMD ["./balancer"]

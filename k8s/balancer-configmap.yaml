@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: balancer-config
+  namespace: go-balancer
+data:
+  config.json: |
+    {
+      "backendname": "backend-service",
+      "backendport": 80,
+      "loadbalancerport": 8080,
+      "loadbalancermethod": "RoundRobin"
+    }

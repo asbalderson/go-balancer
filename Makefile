@@ -1,11 +1,12 @@
-.PHONY: help run test lint lint-fix imports build clean docker-build kind kind-delete k8s-deploy k8s-deploy-backend k8s-deploy-loadbalancer k8s-delete k8s-delete-backend k8s-delete-loadbalancer k8s-load-image k8s-status k8s-test k8s-test-status k8s-test-ping k8s-update-backend k8s-restart-backend
+.PHONY: help run test lint lint-fix imports build clean docker-build docker-build-backend docker-build-balancer kind kind-delete k8s-deploy k8s-deploy-backend k8s-deploy-balancer k8s-delete k8s-delete-backend k8s-delete-balancer k8s-load-image k8s-load-backend-image k8s-load-balancer-image k8s-status k8s-test k8s-test-backend-status k8s-test-backend-ping k8s-test-balancer-status k8s-update-backend k8s-update-balancer k8s-restart-backend k8s-restart-balancer
 
 # Set PATH to include Go binaries
 export PATH := $(HOME)/go/bin:$(PATH)
 
 # Docker configuration
 DOCKER_REGISTRY ?= localhost:5000
-DOCKER_IMAGE ?= go-balancer-backend
+BACKEND_IMAGE ?= go-balancer-backend
+BALANCER_IMAGE ?= go-balancer-balancer
 DOCKER_TAG ?= latest
 
 # Kind cluster configuration
@@ -13,6 +14,9 @@ KIND_CLUSTER_NAME ?= go-balancer
 
 # Backend configuration
 BACKEND_REPLICAS ?= 3
+
+# Balancer configuration
+BALANCER_REPLICAS ?= 1
 
 # Default target - show help
 help:
@@ -28,31 +32,40 @@ help:
 	@echo "  make clean        - Clean build artifacts"
 	@echo ""
 	@echo "Docker:"
-	@echo "  make docker-build - Build Docker image for backend"
+	@echo "  make docker-build          - Build Docker images for both backend and balancer"
+	@echo "  make docker-build-backend  - Build Docker image for backend only"
+	@echo "  make docker-build-balancer - Build Docker image for balancer only"
 	@echo ""
 	@echo "Kubernetes:"
-	@echo "  make kind                    - Create kind cluster (if not already running)"
-	@echo "  make kind-delete             - Delete kind cluster"
-	@echo "  make k8s-load-image          - Load Docker image into kind cluster"
-	@echo "  make k8s-deploy              - Deploy both backend and loadbalancer"
-	@echo "  make k8s-deploy-backend      - Deploy backend only (first time)"
-	@echo "  make k8s-deploy-loadbalancer - Deploy loadbalancer only (TODO)"
-	@echo "  make k8s-update-backend      - Rebuild, reload, and restart backend"
-	@echo "  make k8s-restart-backend     - Restart backend pods (no rebuild)"
-	@echo "  make k8s-delete              - Delete all resources"
-	@echo "  make k8s-delete-backend      - Delete backend only"
-	@echo "  make k8s-delete-loadbalancer - Delete loadbalancer only (TODO)"
-	@echo "  make k8s-status              - Show status of all pods and services"
-	@echo "  make k8s-test                - Test backend endpoints (status + ping)"
-	@echo "  make k8s-test-status         - Test /status endpoint"
-	@echo "  make k8s-test-ping           - Test /ping endpoint (5 times)"
+	@echo "  make kind                      - Create kind cluster (if not already running)"
+	@echo "  make kind-delete               - Delete kind cluster"
+	@echo "  make k8s-load-image            - Load both Docker images into kind cluster"
+	@echo "  make k8s-load-backend-image    - Load backend Docker image only"
+	@echo "  make k8s-load-balancer-image   - Load balancer Docker image only"
+	@echo "  make k8s-deploy                - Deploy both backend and balancer"
+	@echo "  make k8s-deploy-backend       - Deploy backend only"
+	@echo "  make k8s-deploy-balancer      - Deploy balancer only"
+	@echo "  make k8s-update-backend       - Rebuild, reload, and restart backend"
+	@echo "  make k8s-update-balancer      - Rebuild, reload, and restart balancer"
+	@echo "  make k8s-restart-backend      - Restart backend pods (no rebuild)"
+	@echo "  make k8s-restart-balancer     - Restart balancer pods (no rebuild)"
+	@echo "  make k8s-delete               - Delete all resources"
+	@echo "  make k8s-delete-backend       - Delete backend only"
+	@echo "  make k8s-delete-balancer      - Delete balancer only"
+	@echo "  make k8s-status               - Show status of all pods and services"
+	@echo "  make k8s-test                 - Test backend endpoints (status + ping)"
+	@echo "  make k8s-test-backend-status  - Test backend /status endpoint"
+	@echo "  make k8s-test-backend-ping    - Test backend /ping endpoint"
+	@echo "  make k8s-test-balancer-status - Test balancer /status endpoint"
 	@echo ""
 	@echo "Variables (override with VARIABLE=value):"
 	@echo "  DOCKER_REGISTRY      - Docker registry (default: localhost:5000)"
-	@echo "  DOCKER_IMAGE         - Image name (default: go-balancer-backend)"
+	@echo "  BACKEND_IMAGE        - Backend image name (default: go-balancer-backend)"
+	@echo "  BALANCER_IMAGE       - Balancer image name (default: go-balancer-balancer)"
 	@echo "  DOCKER_TAG           - Image tag (default: latest)"
 	@echo "  KIND_CLUSTER_NAME    - Kind cluster name (default: go-balancer)"
 	@echo "  BACKEND_REPLICAS     - Number of backend replicas (default: 3)"
+	@echo "  BALANCER_REPLICAS    - Number of balancer replicas (default: 1)"
 
 # Run the backend service
 run:
@@ -111,10 +124,18 @@ check: fmt lint test
 	@echo "All checks passed!"
 
 # Docker commands
-docker-build:
-	@echo "Building Docker image..."
-	docker build -t $(DOCKER_REGISTRY)/$(DOCKER_IMAGE):$(DOCKER_TAG) backend/
-	@echo "Image built: $(DOCKER_REGISTRY)/$(DOCKER_IMAGE):$(DOCKER_TAG)"
+docker-build-backend:
+	@echo "Building backend Docker image..."
+	docker build -t $(DOCKER_REGISTRY)/$(BACKEND_IMAGE):$(DOCKER_TAG) backend/
+	@echo "Image built: $(DOCKER_REGISTRY)/$(BACKEND_IMAGE):$(DOCKER_TAG)"
+
+docker-build-balancer:
+	@echo "Building balancer Docker image..."
+	docker build -t $(DOCKER_REGISTRY)/$(BALANCER_IMAGE):$(DOCKER_TAG) balancer/
+	@echo "Image built: $(DOCKER_REGISTRY)/$(BALANCER_IMAGE):$(DOCKER_TAG)"
+
+docker-build: docker-build-backend docker-build-balancer
+	@echo "All Docker images built!"
 
 # Kind cluster management
 kind:
@@ -135,10 +156,18 @@ kind-delete:
 	@echo "Cluster deleted"
 
 # Kubernetes deployment commands
-k8s-load-image:
-	@echo "Loading Docker image into kind cluster..."
-	kind load docker-image $(DOCKER_REGISTRY)/$(DOCKER_IMAGE):$(DOCKER_TAG) --name $(KIND_CLUSTER_NAME)
-	@echo "Image loaded into kind cluster"
+k8s-load-backend-image:
+	@echo "Loading backend Docker image into kind cluster..."
+	kind load docker-image $(DOCKER_REGISTRY)/$(BACKEND_IMAGE):$(DOCKER_TAG) --name $(KIND_CLUSTER_NAME)
+	@echo "Backend image loaded into kind cluster"
+
+k8s-load-balancer-image:
+	@echo "Loading balancer Docker image into kind cluster..."
+	kind load docker-image $(DOCKER_REGISTRY)/$(BALANCER_IMAGE):$(DOCKER_TAG) --name $(KIND_CLUSTER_NAME)
+	@echo "Balancer image loaded into kind cluster"
+
+k8s-load-image: k8s-load-backend-image k8s-load-balancer-image
+	@echo "All Docker images loaded into kind cluster!"
 
 k8s-deploy-backend:
 	@echo "Deploying backend to Kubernetes (replicas: $(BACKEND_REPLICAS))..."
@@ -155,16 +184,32 @@ k8s-restart-backend:
 	kubectl rollout status deployment/backend -n go-balancer
 	@echo "Backend restarted!"
 
-k8s-update-backend: docker-build k8s-load-image k8s-restart-backend
+k8s-update-backend: docker-build-backend k8s-load-backend-image k8s-restart-backend
 	@echo "Backend updated successfully!"
 	@echo ""
 	@make k8s-status
 
-k8s-deploy-loadbalancer:
-	@echo "Loadbalancer deployment not yet implemented"
-	@echo "This will be added when you build the loadbalancer component"
+k8s-deploy-balancer:
+	@echo "Deploying balancer to Kubernetes (replicas: $(BALANCER_REPLICAS))..."
+	kubectl apply -f k8s/namespace.yaml
+	kubectl apply -f k8s/balancer-configmap.yaml
+	sed 's/replicas: .*/replicas: $(BALANCER_REPLICAS)/' k8s/balancer-deployment.yaml | kubectl apply -f -
+	kubectl apply -f k8s/balancer-service.yaml
+	@echo "Balancer deployed! Use 'make k8s-status' to check status"
 
-k8s-deploy: k8s-deploy-backend k8s-deploy-loadbalancer
+k8s-restart-balancer:
+	@echo "Restarting balancer deployment..."
+	kubectl rollout restart deployment/balancer -n go-balancer
+	@echo "Waiting for rollout to complete..."
+	kubectl rollout status deployment/balancer -n go-balancer
+	@echo "Balancer restarted!"
+
+k8s-update-balancer: docker-build-balancer k8s-load-balancer-image k8s-restart-balancer
+	@echo "Balancer updated successfully!"
+	@echo ""
+	@make k8s-status
+
+k8s-deploy: k8s-deploy-backend k8s-deploy-balancer
 	@echo "All components deployed!"
 
 k8s-delete-backend:
@@ -174,11 +219,14 @@ k8s-delete-backend:
 	kubectl delete -f k8s/configmap.yaml --ignore-not-found
 	@echo "Backend deleted"
 
-k8s-delete-loadbalancer:
-	@echo "Loadbalancer deletion not yet implemented"
-	@echo "This will be added when you build the loadbalancer component"
+k8s-delete-balancer:
+	@echo "Deleting balancer from Kubernetes..."
+	kubectl delete -f k8s/balancer-service.yaml --ignore-not-found
+	kubectl delete -f k8s/balancer-deployment.yaml --ignore-not-found
+	kubectl delete -f k8s/balancer-configmap.yaml --ignore-not-found
+	@echo "Balancer deleted"
 
-k8s-delete: k8s-delete-backend k8s-delete-loadbalancer
+k8s-delete: k8s-delete-backend k8s-delete-balancer
 	@echo "Deleting namespace..."
 	kubectl delete -f k8s/namespace.yaml --ignore-not-found
 	@echo "All components deleted"
@@ -197,14 +245,14 @@ k8s-status:
 	kubectl get deployment -n go-balancer 2>/dev/null || echo "No deployments found"
 
 # Test backend endpoints via NodePort
-k8s-test-status:
-	@echo "Testing /status endpoint via NodePort (localhost:30080)..."
+k8s-test-backend-status:
+	@echo "Testing backend /status endpoint via NodePort (localhost:30080)..."
 	@echo ""
 	@curl -s localhost:30080/status | jq . || curl -s localhost:30080/status
 	@echo ""
 
-k8s-test-ping:
-	@echo "Testing /ping endpoint - Load balancing across pods (10 requests)..."
+k8s-test-backend-ping:
+	@echo "Testing backend /ping endpoint - Load balancing across pods (10 requests)..."
 	@echo "Watch for different podnames to see load balancing in action!"
 	@echo ""
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
@@ -214,5 +262,12 @@ k8s-test-ping:
 	@echo ""
 	@echo "Notice: Different podnames = Kubernetes Service load balancing working!"
 
-k8s-test: k8s-test-status k8s-test-ping
+# Test balancer endpoints via NodePort
+k8s-test-balancer-status:
+	@echo "Testing balancer /status endpoint via NodePort (localhost:30081)..."
+	@echo ""
+	@curl -s localhost:30081/status | jq . || curl -s localhost:30081/status
+	@echo ""
+
+k8s-test: k8s-test-backend-status k8s-test-backend-ping k8s-test-balancer-status
 	@echo "All tests completed!"

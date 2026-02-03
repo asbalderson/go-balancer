@@ -1,4 +1,6 @@
 {
-    "port": "8080",
-    "servicename": "test"
+    "backendname": "test",
+    "backendport": "8080",
+    "loadbalancerport": "8080",
+    "loadbalancermethod": "RoundRobin"
 }
