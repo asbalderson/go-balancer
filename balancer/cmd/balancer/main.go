@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"balancer/internal/config"
@@ -37,10 +39,20 @@ func main() {
 	fmt.Printf("We loaded the config from main: %v\n", cfg)
 
 	// could just pass in cfg and parse it on the other side, making an interface easier
-	handler := handlers.NewBalanceHandler(cfg.BackendName, cfg.BackendPort, cfg.LoadbalancerPort, cfg.LoadbalancerMethod)
+	// will need to pass the backends over to the server so we have to create those first.
 
+	factory := GetBackendfactory("")
+	backends := GetBackends(factory, cfg.BackendName)
+
+	stopCh := make(chan struct{})
+
+	factory.Start(stopCh)
+	factory.WaitForCacheSync(stopCh)
+
+	handler := handlers.NewBalanceHandler(cfg.BackendName, cfg.BackendPort, cfg.LoadbalancerPort, cfg.LoadbalancerMethod)
 	mux := http.NewServeMux()
 	handler.Register(mux)
+
 	server := http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.LoadbalancerPort),
 		Handler:      mux,
@@ -48,7 +60,19 @@ func main() {
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
-	log.Printf("Starting server on %s", server.Addr)
-	log.Fatal(server.ListenAndServe())
+
+	go func() {
+		<-stopCh
+		server.Shutdown(ctx)
+	}()
+
+	go func() {
+		log.Printf("Starting server on %s", server.Addr)
+		server.ListenAndServe()
+	}()
+
+	signal.Notify(quit, syscall.SIGTERM)
+	<-quit
+	close(stopCH)
 
 }
