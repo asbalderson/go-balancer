@@ -192,6 +192,7 @@ k8s-update-backend: docker-build-backend k8s-load-backend-image k8s-restart-back
 k8s-deploy-balancer:
 	@echo "Deploying balancer to Kubernetes (replicas: $(BALANCER_REPLICAS))..."
 	kubectl apply -f k8s/namespace.yaml
+	kubectl apply -f k8s/balancer-rbac.yaml
 	kubectl apply -f k8s/balancer-configmap.yaml
 	sed 's/replicas: .*/replicas: $(BALANCER_REPLICAS)/' k8s/balancer-deployment.yaml | kubectl apply -f -
 	kubectl apply -f k8s/balancer-service.yaml
@@ -224,6 +225,7 @@ k8s-delete-balancer:
 	kubectl delete -f k8s/balancer-service.yaml --ignore-not-found
 	kubectl delete -f k8s/balancer-deployment.yaml --ignore-not-found
 	kubectl delete -f k8s/balancer-configmap.yaml --ignore-not-found
+	kubectl delete -f k8s/balancer-rbac.yaml --ignore-not-found
 	@echo "Balancer deleted"
 
 k8s-delete: k8s-delete-backend k8s-delete-balancer

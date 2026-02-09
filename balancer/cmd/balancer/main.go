@@ -1,22 +1,26 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"balancer/internal/config"
+	"balancer/internal/discovery"
 	"balancer/internal/handlers"
 )
 
 func main() {
 	paths := []string{
-		"/etc/backend/config.json",
+		"/etc/balancer/config.json",
 		"config.json",
 	}
+	// consider a kubeconf config value for running locally.
 	var cfg *config.Config
 	var err error
 
@@ -38,21 +42,20 @@ func main() {
 
 	fmt.Printf("We loaded the config from main: %v\n", cfg)
 
-	// could just pass in cfg and parse it on the other side, making an interface easier
-	// will need to pass the backends over to the server so we have to create those first.
-
-	factory := GetBackendfactory("")
-	backends := GetBackends(factory, cfg.BackendName)
-
 	stopCh := make(chan struct{})
 
+	factory, err := discovery.GetBackendFactory("")
+	if err != nil {
+		log.Fatal("Failed to create the backend factory")
+	}
+	backends := discovery.GetBackends(factory, cfg.BackendName)
 	factory.Start(stopCh)
+	// consider using cache.WaitForCacheSync(stopCh, endpointInformer.HasSynced) so you can capture bool out for errors
 	factory.WaitForCacheSync(stopCh)
 
-	handler := handlers.NewBalanceHandler(cfg.BackendName, cfg.BackendPort, cfg.LoadbalancerPort, cfg.LoadbalancerMethod)
+	handler := handlers.NewBalanceHandler(cfg.BackendName, cfg.BackendPort, cfg.LoadbalancerPort, cfg.LoadbalancerMethod, backends)
 	mux := http.NewServeMux()
 	handler.Register(mux)
-
 	server := http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.LoadbalancerPort),
 		Handler:      mux,
@@ -62,17 +65,19 @@ func main() {
 	}
 
 	go func() {
-		<-stopCh
-		server.Shutdown(ctx)
-	}()
-
-	go func() {
 		log.Printf("Starting server on %s", server.Addr)
 		server.ListenAndServe()
 	}()
 
-	signal.Notify(quit, syscall.SIGTERM)
+	go func() {
+		<-stopCh
+		log.Println("Stopping server")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		server.Shutdown(ctx)
+	}()
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
-	close(stopCH)
-
+	close(stopCh)
 }

@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: balancer
+  namespace: go-balancer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: balancer-endpoint-reader
+  namespace: go-balancer
+rules:
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: balancer-endpoint-reader
+  namespace: go-balancer
+subjects:
+- kind: ServiceAccount
+  name: balancer
+  namespace: go-balancer
+roleRef:
+  kind: Role
+  name: balancer-endpoint-reader
+  apiGroup: rbac.authorization.k8s.io
