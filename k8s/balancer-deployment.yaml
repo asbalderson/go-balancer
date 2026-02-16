@@ -15,6 +15,7 @@ spec:
       labels:
         app: balancer
     spec:
+      serviceAccountName: balancer
       containers:
       - name: balancer
         image: localhost:5000/go-balancer-balancer:latest
@@ -38,7 +39,7 @@ spec:
               fieldPath: metadata.namespace
         volumeMounts:
         - name: config
-          mountPath: /etc/backend
+          mountPath: /etc/balancer
           readOnly: true
         # Health checks
         livenessProbe:

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"balancer/internal/discovery"
 )
 
 type StatusResponse struct {
@@ -25,15 +27,17 @@ type BalanceHandler struct {
 	LoadbalancerPort   int
 	LoadbalancerMethod string
 	StartTime          string
+	Backends           *discovery.BackendList
 }
 
-func NewBalanceHandler(backendName string, backendPort int, loadbalancerPort int, loadbalancerMethod string) *BalanceHandler {
+func NewBalanceHandler(backendName string, backendPort int, loadbalancerPort int, loadbalancerMethod string, backends *discovery.BackendList) *BalanceHandler {
 	return &BalanceHandler{
 		BackendName:        backendName,
 		BackendPort:        backendPort,
 		LoadbalancerPort:   loadbalancerPort,
 		LoadbalancerMethod: loadbalancerMethod,
 		StartTime:          time.Now().Format(time.RFC3339),
+		Backends:           backends,
 	}
 }
 
@@ -69,7 +73,7 @@ func (s *BalanceHandler) status(w http.ResponseWriter, r *http.Request) {
 		LoadbalancerPort:   s.LoadbalancerPort,
 		LoadbalancerMethod: s.LoadbalancerMethod,
 		StartTime:          s.StartTime,
-		ConnectedHosts:     0,
+		ConnectedHosts:     len(s.Backends.GetAll()),
 	}
 	writeJSON(w, http.StatusOK, response)
 }

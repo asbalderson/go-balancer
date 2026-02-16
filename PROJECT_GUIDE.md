@@ -262,6 +262,32 @@ curl localhost:8080/info | jq .
 - Add `GET /debug/next-backend` endpoint - shows which backend would be selected (doesn't forward)
 - Write tests for balancer with mock backend lists
 
+**How round-robin works with a changing backend list:**
+
+The key insight: you don't loop over backends. Each request picks ONE backend:
+
+```
+1. Get current backends list (brief RLock, snapshot, RUnlock)
+2. counter++ (atomic, no lock needed)
+3. Pick: backends[counter % len(backends)]
+4. Forward request to that backend
+5. Done - lock released before forwarding
+```
+
+The counter lives separately and increments forever. Modulo handles changing list sizes:
+
+```
+Request 1: 3 backends, counter=1 → pick 1%3=1 → backend B
+Request 2: 3 backends, counter=2 → pick 2%3=2 → backend C
+(pod dies, now 2 backends)
+Request 3: 2 backends, counter=3 → pick 3%2=1 → backend B
+Request 4: 2 backends, counter=4 → pick 4%2=0 → backend A
+```
+
+Use `sync/atomic.AddUint64(&counter, 1)` for thread-safe counter increment without locks.
+
+**Important:** The backend map can update between requests - that's fine! Each request gets a fresh snapshot. You're NOT holding a lock while forwarding.
+
 **Test it:**
 ```bash
 curl localhost:8080/debug/next-backend
