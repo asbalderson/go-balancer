@@ -1,4 +1,4 @@
-.PHONY: help run test lint lint-fix imports build clean docker-build docker-build-backend docker-build-balancer kind kind-delete k8s-deploy k8s-deploy-backend k8s-deploy-balancer k8s-delete k8s-delete-backend k8s-delete-balancer k8s-load-image k8s-load-backend-image k8s-load-balancer-image k8s-status k8s-test k8s-test-backend-status k8s-test-backend-ping k8s-test-balancer-status k8s-update-backend k8s-update-balancer k8s-restart-backend k8s-restart-balancer
+.PHONY: help run test lint lint-fix imports build clean docker-build docker-build-backend docker-build-balancer kind kind-delete k8s-deploy k8s-deploy-backend k8s-deploy-balancer k8s-delete k8s-delete-backend k8s-delete-balancer k8s-load-image k8s-load-backend-image k8s-load-balancer-image k8s-status k8s-test k8s-test-backend-status k8s-test-backend-ping k8s-test-balancer-status k8s-test-balancer-ping k8s-update-backend k8s-update-balancer k8s-restart-backend k8s-restart-balancer
 
 # Set PATH to include Go binaries
 export PATH := $(HOME)/go/bin:$(PATH)
@@ -53,10 +53,9 @@ help:
 	@echo "  make k8s-delete-backend       - Delete backend only"
 	@echo "  make k8s-delete-balancer      - Delete balancer only"
 	@echo "  make k8s-status               - Show status of all pods and services"
-	@echo "  make k8s-test                 - Test backend endpoints (status + ping)"
-	@echo "  make k8s-test-backend-status  - Test backend /status endpoint"
-	@echo "  make k8s-test-backend-ping    - Test backend /ping endpoint"
+	@echo "  make k8s-test                 - Test balancer endpoints (status + ping)"
 	@echo "  make k8s-test-balancer-status - Test balancer /status endpoint"
+	@echo "  make k8s-test-balancer-ping   - Test round-robin via balancer /ping"
 	@echo ""
 	@echo "Variables (override with VARIABLE=value):"
 	@echo "  DOCKER_REGISTRY      - Docker registry (default: localhost:5000)"
@@ -271,5 +270,16 @@ k8s-test-balancer-status:
 	@curl -s localhost:30081/status | jq . || curl -s localhost:30081/status
 	@echo ""
 
-k8s-test: k8s-test-backend-status k8s-test-backend-ping k8s-test-balancer-status
+k8s-test-balancer-ping:
+	@echo "Testing round-robin load balancing via balancer (localhost:30081)..."
+	@echo "Watch for different podnames to see round-robin in action!"
+	@echo ""
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		echo "Request $$i:"; \
+		curl -s localhost:30081/ping | jq -r '"\(.podname) - count: \(.count)"' || curl -s localhost:30081/ping; \
+	done
+	@echo ""
+	@echo "Notice: Different podnames in rotation = round-robin working!"
+
+k8s-test: k8s-test-balancer-status k8s-test-balancer-ping
 	@echo "All tests completed!"

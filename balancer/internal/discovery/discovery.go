@@ -34,7 +34,7 @@ func createClient(kubeconfigPath string) (kubernetes.Interface, error) {
 
 	client, err := kubernetes.NewForConfig(kubeconf)
 	if err != nil {
-		return nil, fmt.Errorf("unable to creat a client: %v", err)
+		return nil, fmt.Errorf("unable to create a client: %v", err)
 	}
 
 	return client, nil
