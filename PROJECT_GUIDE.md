@@ -252,30 +252,42 @@ curl localhost:8080/info | jq .
 
 ---
 
-#### Step 5: Add Round-Robin Selection (No Forwarding)
-**Goal:** Prove selection logic works before adding proxy complexity
+#### Step 5: Selection + Proxy Forwarding
+**Goal:** Select backends with round-robin and forward requests via reverse proxy
 
-**What to build:**
-- Create `internal/balancer/` package
-- Implement round-robin selection with counter (needs mutex)
-- `SelectBackend(backends []string) (string, error)` - returns next backend, wraps around
-- Add `GET /debug/next-backend` endpoint - shows which backend would be selected (doesn't forward)
-- Write tests for balancer with mock backend lists
+**Architecture — Three Separate Concerns:**
 
-**How round-robin works with a changing backend list:**
-
-The key insight: you don't loop over backends. Each request picks ONE backend:
+The forwarding system has three distinct responsibilities. Keeping them separate makes
+each piece testable and swappable independently.
 
 ```
-1. Get current backends list (brief RLock, snapshot, RUnlock)
-2. counter++ (atomic, no lock needed)
-3. Pick: backends[counter % len(backends)]
-4. Forward request to that backend
-5. Done - lock released before forwarding
+Request → Handler → Strategy (pick backend) → Proxy Rewrite (set target URL) → Backend
 ```
 
-The counter lives separately and increments forever. Modulo handles changing list sizes:
+**1. Strategy — "which backend?"**
 
+The strategy only answers one question: given a list of backends, which one should
+handle the next request? It knows nothing about HTTP, proxying, or requests.
+
+Define a `Strategy` interface (can live in the handler package for now):
+
+```go
+type Strategy interface {
+    Next(backends []discovery.Backend) (discovery.Backend, error)
+}
+```
+
+RoundRobin implements this with a counter and mutex:
+- Lock, increment counter, compute `counter % len(backends)`, unlock
+- Return the selected backend
+- Error if backends list is empty
+
+Why a mutex on the counter: two requests arriving at the same time could both read
+the same counter value and pick the same backend. The lock ensures each request gets
+a unique index. Since we already need the lock for the counter, no need for atomic —
+just use a regular int inside the locked section.
+
+How it handles a changing backend list:
 ```
 Request 1: 3 backends, counter=1 → pick 1%3=1 → backend B
 Request 2: 3 backends, counter=2 → pick 2%3=2 → backend C
@@ -283,50 +295,93 @@ Request 2: 3 backends, counter=2 → pick 2%3=2 → backend C
 Request 3: 2 backends, counter=3 → pick 3%2=1 → backend B
 Request 4: 2 backends, counter=4 → pick 4%2=0 → backend A
 ```
+The counter increments forever. Modulo handles changing list sizes naturally.
 
-Use `sync/atomic.AddUint64(&counter, 1)` for thread-safe counter increment without locks.
+**2. Handler — "coordinate the pieces"**
 
-**Important:** The backend map can update between requests - that's fine! Each request gets a fresh snapshot. You're NOT holding a lock while forwarding.
+The handler owns the strategy, the backend list, and the proxy. It has a
+`selectBackend()` method that both `/next-backend` and the proxy rewrite use:
 
-**Test it:**
-```bash
-curl localhost:8080/debug/next-backend
-# {"selected": "10.244.0.5:8080"}
-curl localhost:8080/debug/next-backend
-# {"selected": "10.244.0.6:8080"}
-curl localhost:8080/debug/next-backend
-# {"selected": "10.244.0.7:8080"}
-curl localhost:8080/debug/next-backend
-# {"selected": "10.244.0.5:8080"}  # wrapped around!
+```go
+func (bh *BalanceHandler) selectBackend() (discovery.Backend, error) {
+    backends := bh.Backends.GetAll()  // safe snapshot from BackendList
+    return bh.Strategy.Next(backends) // strategy picks one
+}
 ```
 
-**Success criteria:** ✅ Selection rotates through all backends in order
-**Estimated time:** 1-2 hours
+This is called from:
+- `/next-backend` endpoint — calls selectBackend(), returns the result as JSON
+- The proxy's Rewrite function — calls selectBackend(), sets the target URL
 
----
+No duplicated selection logic. One method, two callers.
 
-#### Step 6: Add Proxy Forwarding
-**Goal:** Actually forward requests to backends!
+**3. Proxy Rewrite — "send the request there"**
 
-**What to build:**
-- Create `internal/proxy/` package
-- Use `httputil.ReverseProxy` to forward requests
-- Create function that takes backend address and returns configured proxy
-- Update main HTTP handler:
-  - If path is `/health`, `/info`, or `/debug/*` → handle directly
-  - Everything else → select backend and proxy
-- Increment request counters when forwarding
-- Log each forwarded request (which backend)
+The proxy lives as a field on the handler, created once at startup. The `Rewrite`
+function is a closure (or method) on the handler, so it has access to `selectBackend()`:
+
+```go
+// Inside the handler, create the proxy once:
+bh.Proxy = &httputil.ReverseProxy{
+    Rewrite: func(pr *httputil.ProxyRequest) {
+        backend, err := bh.selectBackend()
+        // build target URL from backend.Address and bh.BackendPort
+        // set pr.Out.URL to target
+        // set pr.Out.Host
+    },
+    ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+        log.Printf("Proxy error: %v", err)
+        w.WriteHeader(http.StatusBadGateway)
+    },
+}
+```
+
+The `Rewrite` function is called by the ReverseProxy on every request. It:
+1. Calls `selectBackend()` to pick a backend (strategy does the round-robin)
+2. Builds the target URL (e.g., `http://10.244.0.5:8080`)
+3. Sets the outgoing request's URL and Host to point at that backend
+4. ReverseProxy handles the actual HTTP forwarding, copying headers, streaming the response back
+
+**Why not a separate proxy package?**
+
+Creating the proxy in a separate package would require passing the handler into it,
+creating a circular dependency (handlers imports proxy, proxy imports handlers).
+Instead, the proxy is created as part of the handler — the Rewrite closure naturally
+captures the handler's fields. Simpler, no import cycles.
+
+**Why the strategy doesn't return a Rewrite function:**
+
+The strategy's job is selection, not HTTP manipulation. If the strategy returned a
+Rewrite function, it would need to know about `httputil.ProxyRequest`, URL building,
+and port configuration — none of which are its concern. Keeping selection separate from
+proxying means:
+- You can test round-robin logic with no HTTP involved
+- You can swap strategies without touching proxy code
+- Each piece has one job
+
+**Route registration:**
+
+```go
+func (bh *BalanceHandler) Register(mux *http.ServeMux) {
+    mux.HandleFunc("/status", bh.status)
+    mux.HandleFunc("/next-backend", bh.nextBackend)
+    mux.Handle("/", bh.Proxy)  // everything else gets proxied
+}
+```
+
+Note: the proxy implements `http.Handler` already, so use `mux.Handle` not `mux.HandleFunc`.
 
 **Test it:**
 ```bash
-# Forward a request through the LB to backend
-curl localhost:8080/status
-# Should see backend response with podname, etc.
+# Check next backend selection
+curl localhost:8080/next-backend
+# {"nexthost": "10.244.0.5:8080"}
+curl localhost:8080/next-backend
+# {"nexthost": "10.244.0.6:8080"}
 
-# Check stats
-curl localhost:8080/info
-# Should see request counts incrementing
+# Forward a request through the LB to backend
+curl localhost:8080/ping
+# Should see backend response with podname
 
 # Hit it multiple times, watch round-robin
 for i in {1..9}; do curl -s localhost:8080/ping | jq -r .podname; done
@@ -334,12 +389,12 @@ for i in {1..9}; do curl -s localhost:8080/ping | jq -r .podname; done
 ```
 
 **Success criteria:**
-- ✅ Requests forwarded to backends
+- ✅ Selection rotates through all backends in order
+- ✅ Requests forwarded to backends via reverse proxy
 - ✅ Backend responses returned to client
-- ✅ Counters increment in `/info`
 - ✅ Round-robin distribution working
 
-**Estimated time:** 2-3 hours
+**Estimated time:** 3-4 hours
 
 ---
 
@@ -418,18 +473,45 @@ Each step has a clear "done" state you can demonstrate:
 
 ---
 
-### Phase 2c: Polish & Testing (Optional)
+### Phase 2c: Polish, Testing & Design Patterns
 
-**Focus:** Add tests and improvements
+**Focus:** Add tests, fix broken tests, and introduce Go design patterns
 
-**Steps:**
-1. Add unit tests for all packages
-2. Add integration tests (mock Kubernetes API)
-3. Improve error messages and logging
-4. Add metrics/observability (request counts, backend health)
-5. Add multiple load balancing strategies (weighted, least-connections)
-6. Add request retry logic (try different backend on failure)
-7. Add circuit breaker (stop sending to failing backends)
+**Design Pattern TODOs:**
+
+1. **Load balancing strategy interface**
+   - Define `Strategy` interface with `Next([]Backend) Backend`
+   - Implement `RoundRobin` as first concrete type
+   - Factory function: `NewStrategy(method string) Strategy` to create from config
+   - Enables adding `LeastConnections`, `Random`, etc. without touching handler code
+
+2. **Functional options for constructors**
+   - `NewBalanceHandler` already takes 5+ params and growing
+   - Refactor to `NewBalanceHandler(opts ...Option)` pattern
+   - Cleaner API with sensible defaults
+
+3. **Interface for BackendList in handlers**
+   - Define `BackendSource` interface in handlers package with `GetAll() []Backend`
+   - Handler depends on the interface, not the concrete `*discovery.BackendList`
+   - Enables mocking in tests without a real K8s cluster
+
+4. **Custom errors**
+   - Replace `log.Fatal` in discovery with wrapped errors using `%w`
+   - Add `ConfigError`, `BackendNotFoundError` types
+   - Use `errors.Is` / `errors.As` for typed error handling
+
+**Test fixes:**
+- Fix balancer config tests (reference wrong field names — `ServiceName` should be `BackendName`, etc.)
+- Rewrite balancer handler tests (copied from backend, reference `NewServiceHandler` and `/ping` which don't exist)
+- Add discovery tests with mock K8s client
+
+**Additional improvements:**
+1. Add integration tests (mock Kubernetes API)
+2. Improve error messages and logging
+3. Add metrics/observability (request counts, backend health)
+4. Add multiple load balancing strategies (weighted, least-connections)
+5. Add request retry logic (try different backend on failure)
+6. Add circuit breaker (stop sending to failing backends)
 
 ---
 
