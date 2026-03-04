@@ -2,7 +2,6 @@ package discovery
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"sync"
 	"time"
@@ -13,6 +12,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"pkg/logging"
 )
 
 func createClient(kubeconfigPath string) (kubernetes.Interface, error) {
@@ -37,6 +38,7 @@ func createClient(kubeconfigPath string) (kubernetes.Interface, error) {
 		return nil, fmt.Errorf("unable to create a client: %v", err)
 	}
 
+	logging.Debug("Created a Kubernetes client")
 	return client, nil
 }
 
@@ -73,13 +75,13 @@ func reconcile(endpoints *corev1.Endpoints, backendList *BackendList, serviceNam
 	if name != serviceName {
 		return
 	}
-	log.Printf("Detected an update for our service, updating now")
+	logging.Debug("Detected an update for service %s, updating now", serviceName)
 	var backends []Backend
 	for _, subnet := range endpoints.Subsets {
 		for _, address := range subnet.Addresses {
 			ip := address.IP
 			podName := address.TargetRef.Name
-			log.Printf("Adding pod %s", podName)
+			logging.Debug("Adding pod %s", podName)
 			backends = append(backends, Backend{
 				Address: ip,
 				PodName: podName,
@@ -87,21 +89,22 @@ func reconcile(endpoints *corev1.Endpoints, backendList *BackendList, serviceNam
 		}
 	}
 	backendList.Replace(backends)
+	logging.Debug("Service pods updated")
 }
 
 func GetBackendFactory(kubeconfPath string) (informers.SharedInformerFactory, error) {
 	client, err := createClient(kubeconfPath)
 	if err != nil {
-		log.Fatal("Failed to load the kubeconf, discovery will fail")
+		return nil, fmt.Errorf("Failed to load kubeconf: %w", err)
 	}
 
 	namespace, ok := os.LookupEnv("NAMESPACE")
 	if !ok {
-		log.Fatal("Failed to get the namespace")
+		return nil, fmt.Errorf("Namespace not set in environment")
 	}
 
 	factory := informers.NewSharedInformerFactoryWithOptions(client, 3*time.Minute, informers.WithNamespace(namespace))
-
+	logging.Debug("Informer created, will watch for service pods to populate")
 	return factory, nil
 }
 

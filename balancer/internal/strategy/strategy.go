@@ -1,6 +1,10 @@
 package strategy
 
-import "balancer/internal/discovery"
+import (
+	"balancer/internal/discovery"
+
+	"pkg/logging"
+)
 
 type Strategy interface {
 	Next(backends []discovery.Backend, requests int) discovery.Backend
@@ -18,5 +22,7 @@ func NewStrategy(method string) Strategy {
 type RoundRobin struct{}
 
 func (rr RoundRobin) Next(backends []discovery.Backend, requests int) discovery.Backend {
-	return backends[requests%len(backends)]
+	next := backends[requests%len(backends)]
+	logging.Debug("Backend requested, sending %s", next)
+	return next
 }

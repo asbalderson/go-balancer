@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -13,6 +12,8 @@ import (
 
 	"balancer/internal/discovery"
 	"balancer/internal/strategy"
+
+	"pkg/logging"
 )
 
 type StatusResponse struct {
@@ -79,6 +80,7 @@ func getPodName() string {
 		hostname, err := os.Hostname()
 		if err != nil {
 			hostname = "unknown"
+			logging.Warning("Unable to determine pod name, using unknown")
 		}
 		podname = hostname
 	}
@@ -89,11 +91,12 @@ func (bh *BalanceHandler) nextBackend(w http.ResponseWriter, r *http.Request) {
 	bh.mu.RLock()
 	requests := bh.Requests
 	bh.mu.RUnlock()
-
 	backend := bh.selectBackend(requests)
 
+	host := fmt.Sprintf("%s:%d", backend.Address, bh.BackendPort)
+
 	next := NextResponse{
-		NextHost: fmt.Sprintf("%s:%d", backend.Address, bh.BackendPort),
+		NextHost: host,
 	}
 	writeJSON(w, http.StatusOK, next)
 }
@@ -109,12 +112,13 @@ func (bh *BalanceHandler) createProxy() {
 			host := fmt.Sprintf("%s:%d", backend.Address, bh.BackendPort)
 			url, err := url.Parse(fmt.Sprintf("http://%s", host))
 			if err != nil {
-				log.Printf("[ERROR] Failed to parse the url from %v", host)
+				logging.Error("Failed to parse the url from %v", host)
+				//TODO do something since the next part of the code will fail if we dont break or exit
 			}
 			pr.SetURL(url)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("Proxy error: %v", err)
+			logging.Error("Proxy error: %v", err)
 			w.WriteHeader(http.StatusBadGateway)
 		},
 	}
@@ -122,7 +126,7 @@ func (bh *BalanceHandler) createProxy() {
 
 func (bh *BalanceHandler) status(w http.ResponseWriter, r *http.Request) {
 	podname := getPodName()
-
+	logging.Debug("Status requsted")
 	podip, ok := os.LookupEnv("POD_IP")
 	if !ok {
 		podip = "127.0.0.1"
@@ -139,6 +143,7 @@ func (bh *BalanceHandler) status(w http.ResponseWriter, r *http.Request) {
 		ConnectedHosts:     len(bh.Backends.GetAll()),
 	}
 	writeJSON(w, http.StatusOK, response)
+	logging.Debug("Sent status: %v", response)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -147,6 +152,6 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	// Encoding errors are uncommon so we just log the error. I bet they never happen
 	// with this code
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		log.Printf("[ERROR] Failed to encode response json: %v", err)
+		logging.Error("Failed to encode response json: %v", err)
 	}
 }

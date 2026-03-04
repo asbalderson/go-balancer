@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"backend/internal/config"
 	"backend/internal/handlers"
+	"pkg/logging"
 )
 
 func main() {
@@ -21,7 +23,6 @@ func main() {
 	for _, path := range paths {
 		cfg, err = config.LoadFromFile(path)
 		if err == nil {
-			log.Printf("Loaded config from %s", path)
 			break
 		}
 	}
@@ -31,11 +32,9 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatal("Failed to load a config from any path or env")
+		logging.Error("Failed to load a config from any path or env: %v", err)
+		os.Exit(1)
 	}
-
-	fmt.Printf("We loaded the config from main: %v\n", cfg)
-
 	handler := handlers.NewServiceHandler(cfg.ServiceName)
 
 	mux := http.NewServeMux()
@@ -47,7 +46,7 @@ func main() {
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
-	log.Printf("Starting server on %s", server.Addr)
+	logging.Info("Starting server on %s", server.Addr)
 	log.Fatal(server.ListenAndServe())
 
 }

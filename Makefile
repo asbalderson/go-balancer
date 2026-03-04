@@ -125,12 +125,12 @@ check: fmt lint test
 # Docker commands
 docker-build-backend:
 	@echo "Building backend Docker image..."
-	docker build -t $(DOCKER_REGISTRY)/$(BACKEND_IMAGE):$(DOCKER_TAG) backend/
+	docker build -t $(DOCKER_REGISTRY)/$(BACKEND_IMAGE):$(DOCKER_TAG) -f backend/Dockerfile .
 	@echo "Image built: $(DOCKER_REGISTRY)/$(BACKEND_IMAGE):$(DOCKER_TAG)"
 
 docker-build-balancer:
 	@echo "Building balancer Docker image..."
-	docker build -t $(DOCKER_REGISTRY)/$(BALANCER_IMAGE):$(DOCKER_TAG) balancer/
+	docker build -t $(DOCKER_REGISTRY)/$(BALANCER_IMAGE):$(DOCKER_TAG) -f balancer/Dockerfile .
 	@echo "Image built: $(DOCKER_REGISTRY)/$(BALANCER_IMAGE):$(DOCKER_TAG)"
 
 docker-build: docker-build-backend docker-build-balancer

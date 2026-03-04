@@ -2,11 +2,12 @@ package handlers
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"os"
 	"sync/atomic"
 	"time"
+
+	"pkg/logging"
 )
 
 type StatusResponse struct {
@@ -35,6 +36,7 @@ func getPodName() string {
 		hostname, err := os.Hostname()
 		if err != nil {
 			hostname = "unknown"
+			logging.Warning("Failed to get any pod name. Using unknown")
 		}
 		podname = hostname
 	}
@@ -54,6 +56,7 @@ func (s ServiceHandler) Register(mux *http.ServeMux) {
 }
 
 func (s *ServiceHandler) status(w http.ResponseWriter, r *http.Request) {
+	logging.Debug("Recieved status request")
 	podname := getPodName()
 
 	podip, ok := os.LookupEnv("POD_IP")
@@ -67,10 +70,12 @@ func (s *ServiceHandler) status(w http.ResponseWriter, r *http.Request) {
 		ServiceName: s.ServiceName,
 		StartTime:   s.StartTime,
 	}
+	logging.Debug("Sending status: %v", response)
 	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *ServiceHandler) ping(w http.ResponseWriter, r *http.Request) {
+	logging.Debug("Recieved ping request")
 	count := atomic.AddInt64(&s.Count, 1)
 	response := PingResponse{
 		ServiceName: s.ServiceName,
@@ -78,6 +83,7 @@ func (s *ServiceHandler) ping(w http.ResponseWriter, r *http.Request) {
 		Timestamp:   time.Now().Format(time.RFC3339),
 		Count:       count,
 	}
+	logging.Debug("Sending ping: %v", response)
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -87,6 +93,6 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	// Endcoding errors are uncommon so we just log the error. I bet they never happen
 	// with this code
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		log.Printf("[ERROR] Failed to encode respoonse json: %v", err)
+		logging.Error("Failed to encode respoonse json: %v", err)
 	}
 }

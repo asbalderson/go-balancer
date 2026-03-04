@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +12,7 @@ import (
 	"balancer/internal/config"
 	"balancer/internal/discovery"
 	"balancer/internal/handlers"
+	"pkg/logging"
 )
 
 func main() {
@@ -27,7 +27,6 @@ func main() {
 	for _, path := range paths {
 		cfg, err = config.LoadFromFile(path)
 		if err == nil {
-			log.Printf("Loaded config from %s", path)
 			break
 		}
 	}
@@ -37,16 +36,18 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatal("Failed to load a config from any path or env")
+		logging.Error("Failed to load a config from any path or env, %v", err)
+		os.Exit(1)
 	}
 
-	fmt.Printf("We loaded the config from main: %v\n", cfg)
+	logging.Debug("We loaded the config from main: %v\n", cfg)
 
 	stopCh := make(chan struct{})
 
 	factory, err := discovery.GetBackendFactory("")
 	if err != nil {
-		log.Fatal("Failed to create the backend factory")
+		logging.Error("Failed to create backend factory: %v", err)
+		os.Exit(1)
 	}
 	backends := discovery.GetBackends(factory, cfg.BackendName)
 	factory.Start(stopCh)
@@ -65,13 +66,13 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("Starting server on %s", server.Addr)
+		logging.Info("Starting server on %s", server.Addr)
 		server.ListenAndServe()
 	}()
 
 	go func() {
 		<-stopCh
-		log.Println("Stopping server")
+		logging.Warning("Stopping server")
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		server.Shutdown(ctx)
