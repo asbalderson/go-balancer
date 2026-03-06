@@ -8,13 +8,14 @@ import (
 var Level int = INFO
 
 const (
-	DEBUG = 0
-	INFO  = 1
-	WARN  = 2
-	ERROR = 3
+	DEBUG  = 0
+	INFO   = 1
+	WARN   = 2
+	ERROR  = 3
+	SILENT = 4
 )
 
-func Debug(input string, args ...interface{}) {
+func Debug(input string, args ...any) {
 	if Level > DEBUG {
 		return
 	}
@@ -22,7 +23,7 @@ func Debug(input string, args ...interface{}) {
 	log.Printf("[DEBUG] - %s", msg)
 }
 
-func Info(input string, args ...interface{}) {
+func Info(input string, args ...any) {
 	if Level > INFO {
 		return
 	}
@@ -30,7 +31,7 @@ func Info(input string, args ...interface{}) {
 	log.Printf("[INFO] - %s", msg)
 }
 
-func Warning(input string, args ...interface{}) {
+func Warning(input string, args ...any) {
 	if Level > WARN {
 		return
 	}
@@ -38,7 +39,7 @@ func Warning(input string, args ...interface{}) {
 	log.Printf("[WARN] - %s", msg)
 }
 
-func Error(input string, args ...interface{}) {
+func Error(input string, args ...any) {
 	if Level > ERROR {
 		return
 	}
