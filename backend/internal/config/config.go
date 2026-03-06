@@ -3,9 +3,10 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
+
+	"pkg/logging"
 )
 
 type Config struct {
@@ -32,7 +33,7 @@ func LoadFromEnv() (*Config, error) {
 		Port:        port,
 		ServiceName: servicename,
 	}
-
+	logging.Debug("Loaded config from the Environment: %+v", cfg)
 	return &cfg, nil
 }
 
@@ -45,12 +46,12 @@ func LoadFromFile(path string) (*Config, error) {
 
 	decoder := json.NewDecoder(file)
 
-	config := &Config{}
+	cfg := &Config{}
 
-	err = decoder.Decode(&config)
+	err = decoder.Decode(&cfg)
 	if err != nil {
 		return nil, fmt.Errorf("Error parsing JSON: %w", err)
 	}
-	log.Printf("Loaded the json: %+v", config)
-	return config, nil
+	logging.Debug("Loaded config from Path %s: %+v", path, cfg)
+	return cfg, nil
 }

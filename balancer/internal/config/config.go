@@ -3,9 +3,10 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
+
+	"pkg/logging"
 )
 
 const (
@@ -76,7 +77,7 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	logging.Debug("Loaded configuration from environment: %+v", cfg)
 	return &cfg, nil
 }
 
@@ -95,12 +96,12 @@ func LoadFromFile(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Error parsing JSON: %w", err)
 	}
-	log.Printf("Loaded the json: %+v", cfg)
 
 	err = cfg.validate()
 	if err != nil {
 		return nil, err
 	}
 
+	logging.Debug("Loaded config from json: %+v", cfg)
 	return cfg, nil
 }
